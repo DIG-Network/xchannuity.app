@@ -11,7 +11,8 @@ use chia_sdk_utils::Address;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
-use crate::builders::{self, UnsignedBundle};
+use crate::composition::discovery;
+use crate::composition::spend::{self as builders, UnsignedBundle};
 use crate::constants::{PROTOCOL_FEE_BPS, STREAM_MOD_HASH_HEX};
 use crate::dto::{
     self, BundleJson, CreateRequest, EncodeOfferRequest, FlowRequest, OfferDraftJson,
@@ -63,7 +64,7 @@ pub fn annuity_inner_puzzle_hash(
         end_time,
         last_payment_time,
     );
-    let ph: Bytes32 = info.inner_puzzle_hash().into();
+    let ph: Bytes32 = crate::composition::puzzle::annuity_inner_puzzle_hash(&info).into();
     Ok(format!("0x{}", hex::encode(ph)))
 }
 
@@ -84,7 +85,7 @@ pub fn annuity_cat_puzzle_hash(
         last_payment_time,
     );
     let asset_id = parse_b32(&asset_id_hex)?;
-    let cat_ph: Bytes32 = CatArgs::curry_tree_hash(asset_id, info.inner_puzzle_hash()).into();
+    let cat_ph: Bytes32 = crate::composition::puzzle::annuity_cat_puzzle_hash(asset_id, &info);
     Ok(format!("0x{}", hex::encode(cat_ph)))
 }
 
@@ -380,7 +381,7 @@ pub fn discover_from_parent(
     let sol_bytes = hex::decode(solution_hex.trim().trim_start_matches("0x")).map_err(je)?;
     let pr = clvmr::serde::node_from_bytes(&mut ctx, &pr_bytes).map_err(je)?;
     let sol = clvmr::serde::node_from_bytes(&mut ctx, &sol_bytes).map_err(je)?;
-    match crate::discovery::child_from_parent_spend(&mut ctx, coin, pr, sol).map_err(je)? {
+    match discovery::child_from_parent_spend(&mut ctx, coin, pr, sol).map_err(je)? {
         Some(d) => to_value(&dto::discovered_json(&d)).map_err(je),
         None => Ok(JsValue::NULL),
     }
