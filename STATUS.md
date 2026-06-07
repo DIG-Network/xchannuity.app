@@ -15,8 +15,20 @@ xchannuity.app/
 │   │   ├── stream.rue               # the annuity puzzle (claim/transfer/clawback/offer)
 │   │   ├── stream.rue.hex           # compiled CLVM (rue 0.8.4 build, committed)
 │   │   └── stream.rue.hash          # tree hash 39ec8ca9…5046 (committed)
-│   ├── src/{lib,constants,error,info,spend,wasm}.rs
-│   └── tests/{roundtrip,adversarial}.rs
+│   ├── src/
+│   │   ├── layers/             # one file per puzzle boundary, auditable in isolation:
+│   │   │   ├── cat.rs          #   AUDITED: SDK CAT re-export (no custom logic)
+│   │   │   ├── owner.rs        #   AUDITED: owner-auth StreamSolution builders (StandardLayer/settlement)
+│   │   │   ├── clawback.rs     #   CUSTOM: issuer mode-23 message + nil-owner clawback solution
+│   │   │   └── stream.rs       #   CUSTOM: StreamLayer = curried state + math + `impl Layer`
+│   │   ├── composition/        # the only place layers assemble:
+│   │   │   ├── puzzle.rs       #   layers → coin puzzle hashes (CatLayer<StreamLayer>)
+│   │   │   ├── spend.rs        #   layers → create/claim/transfer/clawback/offer bundles
+│   │   │   └── discovery.rs    #   parse parent spend via CatLayer<StreamLayer> → live coin
+│   │   ├── {constants,assets,dto,error,wasm}.rs
+│   │   ├── lib.rs              # re-export facade: crate::builders/discovery + AnnuityInfo=StreamLayer
+│   │   └── {info,spend}.rs     # compat shims re-exporting from layers/
+│   └── tests/{roundtrip,adversarial,builders,exploits,redteam,layers}.rs
 └── app/                            # Next.js 15 static-export dApp (cXCH pattern)
     ├── next.config.ts · tsconfig.json · package.json
     └── app/{layout,page}.tsx, app/lib/{wasm,walletconnect,flow}.ts, app/components/Landing.tsx
@@ -47,8 +59,14 @@ xchannuity.app/
 - 4 in-puzzle `test fn`s pass (`rue test`): exact condition sets per mode.
 
 ### Rust core (`xchannuity-core`) — `cargo build` + `wasm-pack build` clean
-- `AnnuityInfo` mirrors the puzzle; `inner_puzzle_hash` agrees byte-for-byte (proven by round-trip test).
-- `spend.rs`: inner spend builder + the owner-message authorization helper.
+- **Layer-composed:** the annuity coin is `CatLayer<StreamLayer>` via the SDK `Layer` trait.
+  Each puzzle boundary is its own auditable module under `src/layers/` (SDK-backed layers are
+  thin re-exports; the custom `stream.rs` holds all bespoke logic); `src/composition/` is the
+  only place layers assemble (puzzle hashes / spend bundles / discovery). `StreamLayer` carries
+  the curried state + vesting math + `impl Layer`; `AnnuityInfo` is an alias for it.
+- `StreamLayer` mirrors the puzzle; `inner_puzzle_hash` agrees byte-for-byte (proven by round-trip
+  test + the `layers.rs` construct-vs-curry-hash + CatLayer<StreamLayer> parse round-trip guards).
+- `composition/spend.rs`: the `build_*` flows compose owner-auth + stream + CAT into spend bundles.
 - `wasm.rs`: `stream_puzzle_hash_hex`, `protocol_fee_bps`, `annuity_inner_puzzle_hash`,
   `annuity_cat_puzzle_hash`, `claimable_now`, `aggregate_signatures`.
 - WASM-safe: chia-sdk **sub-crates** (`chia-sdk-driver/types/utils` 0.33), not the umbrella crate.
