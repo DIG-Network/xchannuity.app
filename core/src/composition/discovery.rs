@@ -7,16 +7,16 @@
 //! (with the current last_payment_time / recipient) + a lineage proof.
 
 use chia_protocol::{Bytes, Bytes32, Coin};
-use chia_puzzle_types::cat::{CatArgs, CatSolution};
+use chia_puzzle_types::cat::CatArgs;
 use chia_puzzle_types::{LineageProof, Memos};
 use chia_sdk_driver::{CatLayer, HashedPtr, Layer, Puzzle, SpendContext};
 use chia_sdk_types::Condition;
 use clvmr::op_utils::u64_from_bytes;
 use clvmr::NodePtr;
 
-use crate::constants::stream_mod_tree_hash;
 use crate::error::{Error, Result};
-use crate::info::{AnnuityInfo, StreamCurry, StreamSolution};
+use crate::info::AnnuityInfo;
+use crate::layers::stream::StreamLayer;
 
 const MODE_CLAIM: u8 = 0;
 const MODE_TRANSFER: u8 = 1;
@@ -55,62 +55,58 @@ pub fn child_from_parent_spend(
     let parent_puzzle = Puzzle::parse(ctx, puzzle_reveal);
 
     // --- Case A: parent IS a CAT-wrapped annuity (claim/transfer recreated it) ---
-    if let Ok(Some(cat)) = CatLayer::<HashedPtr>::parse_puzzle(ctx, parent_puzzle) {
+    if let Some(cat) = CatLayer::<StreamLayer>::parse_puzzle(&*ctx, parent_puzzle)? {
         let asset_id = cat.asset_id;
-        let inner = Puzzle::parse(ctx, cat.inner_puzzle.ptr());
-        if let Some(curried) = inner.as_curried() {
-            if curried.mod_hash == stream_mod_tree_hash() {
-                let sc: StreamCurry = ctx.extract(curried.args)?;
-                let parent_info = AnnuityInfo::from_curry(&sc);
-                let inner_sol = ctx
-                    .extract::<CatSolution<StreamSolution<NodePtr, NodePtr>>>(solution)?
-                    .inner_puzzle_solution;
+        let parent_info = cat.inner_puzzle; // StreamLayer (= AnnuityInfo)
+        // The puzzle is now a confirmed CAT<StreamLayer>, so its solution MUST be a
+        // well-formed CatSolution — a parse failure here is a data-integrity error,
+        // not an ambiguous puzzle type, so propagate it (`?`) rather than swallow it.
+        let inner_sol =
+            CatLayer::<StreamLayer>::parse_solution(&*ctx, solution)?.inner_puzzle_solution;
 
-                let child = match inner_sol.mode {
-                    MODE_TRANSFER => {
-                        // The layer re-wraps the owner's CREATE_COIN as
-                        // STREAM<new_owner>. Read the new owner hash from the
-                        // continuation coin's memo (= the inner owner hash).
-                        let new_recipient =
-                            transfer_new_owner(ctx, &parent_info, asset_id, puzzle_reveal, solution)?
-                                .ok_or_else(|| {
-                                    Error::Custom("transfer continuation not found".into())
-                                })?;
-                        Some((
-                            AnnuityInfo { recipient: new_recipient, ..parent_info },
-                            parent_coin.amount,
-                        ))
-                    }
-                    MODE_CLAIM => {
-                        let pt = parent_info.clamp_time(inner_sol.payment_time);
-                        let to_pay = parent_info.claimable(parent_coin.amount, pt);
-                        let remainder = parent_coin.amount - to_pay;
-                        if remainder == 0 {
-                            None
-                        } else {
-                            Some((AnnuityInfo { last_payment_time: pt, ..parent_info }, remainder))
-                        }
-                    }
-                    _ => None, // clawback terminates the annuity
-                };
-
-                if let Some((child_info, child_amount)) = child {
-                    let child_cat_ph: Bytes32 =
-                        CatArgs::curry_tree_hash(asset_id, child_info.inner_puzzle_hash()).into();
-                    return Ok(Some(Discovered {
-                        coin: Coin::new(parent_coin.coin_id(), child_cat_ph, child_amount),
-                        asset_id,
-                        info: child_info,
-                        lineage_proof: LineageProof {
-                            parent_parent_coin_info: parent_coin.parent_coin_info,
-                            parent_inner_puzzle_hash: parent_info.inner_puzzle_hash().into(),
-                            parent_amount: parent_coin.amount,
-                        },
-                    }));
-                }
-                return Ok(None);
+        let child = match inner_sol.mode {
+            MODE_TRANSFER => {
+                // The layer re-wraps the owner's CREATE_COIN as
+                // STREAM<new_owner>. Read the new owner hash from the
+                // continuation coin's memo (= the inner owner hash).
+                let new_recipient =
+                    transfer_new_owner(ctx, &parent_info, asset_id, puzzle_reveal, solution)?
+                        .ok_or_else(|| {
+                            Error::Custom("transfer continuation not found".into())
+                        })?;
+                Some((
+                    AnnuityInfo { recipient: new_recipient, ..parent_info },
+                    parent_coin.amount,
+                ))
             }
+            MODE_CLAIM => {
+                let pt = parent_info.clamp_time(inner_sol.payment_time);
+                let to_pay = parent_info.claimable(parent_coin.amount, pt);
+                let remainder = parent_coin.amount - to_pay;
+                if remainder == 0 {
+                    None
+                } else {
+                    Some((AnnuityInfo { last_payment_time: pt, ..parent_info }, remainder))
+                }
+            }
+            _ => None, // clawback terminates the annuity
+        };
+
+        if let Some((child_info, child_amount)) = child {
+            let child_cat_ph: Bytes32 =
+                CatArgs::curry_tree_hash(asset_id, child_info.inner_puzzle_hash()).into();
+            return Ok(Some(Discovered {
+                coin: Coin::new(parent_coin.coin_id(), child_cat_ph, child_amount),
+                asset_id,
+                info: child_info,
+                lineage_proof: LineageProof {
+                    parent_parent_coin_info: parent_coin.parent_coin_info,
+                    parent_inner_puzzle_hash: parent_info.inner_puzzle_hash().into(),
+                    parent_amount: parent_coin.amount,
+                },
+            }));
         }
+        return Ok(None);
     }
 
     // --- Case B: parent CREATED the annuity (funding CAT spend) — read memos ---
