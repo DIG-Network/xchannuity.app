@@ -8,9 +8,11 @@ pub mod constants;
 pub mod discovery;
 pub mod dto;
 pub mod error;
+pub mod layers;
 pub mod info;
 pub mod spend;
 pub mod wasm;
 
 pub use error::{Error, Result};
 pub use info::{AnnuityInfo, StreamCurry, StreamSolution};
+pub use layers::stream::StreamLayer;
