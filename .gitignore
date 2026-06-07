@@ -1,0 +1,33 @@
+# ---- Rust ----
+target/
+**/target/
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- wasm-pack output (generated; rebuild with `npm run build:wasm`) ----
+app/wasm-pkg/
+
+# ---- Rue build artifacts are committed on purpose (puzzles/*.rue.hex/.hash) ----
+
+# ---- env / secrets ----
+.env
+.env.local
+.env.*.local
+
+# ---- scratch (playwright screenshots / helper) ----
+app/pw-*.png
+app/shot.cjs
+
+# ---- editor / OS ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log
