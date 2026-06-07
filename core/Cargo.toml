@@ -1,0 +1,53 @@
+[package]
+name = "xchannuity-core"
+version = "0.1.0"
+edition = "2021"
+description = "Spend-bundle builder for Xchannuity, a transferable streamed-CAT annuity on Chia"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# chia-sdk sub-crates (WASM-safe: NOT the umbrella crate, which pulls chia-sdk-client/tokio/TLS)
+chia-sdk-driver    = { version = "0.33.0", features = ["offer-compression"] }
+chia-sdk-types     = "0.33.0"
+chia-sdk-utils     = "0.33.0"
+chia-protocol      = { version = "0.36.1", features = ["serde"] }
+chia-consensus     = "0.36.1"
+chia-bls           = "0.36.1"
+chia-sha2          = "0.36.1"
+chia-puzzle-types  = "0.36.1"
+chia-puzzles       = "0.20.3"
+clvm-traits        = { version = "0.36.1", features = ["derive"] }
+clvm-utils         = "0.36.1"
+clvmr              = "0.16.2"
+
+wasm-bindgen       = "0.2"
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+serde-wasm-bindgen = "0.6"
+hex                = "0.4"
+hex-literal        = "0.4.1"
+thiserror          = "1"
+# getrandom appears at 0.2 (feature "js") and 0.3 (feature "wasm_js" + cfg in .cargo/config.toml)
+# in the dependency tree; enable the browser backend on both for the wasm32 build.
+getrandom          = { version = "0.2", features = ["js"] }
+getrandom_3        = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+chia-sdk-test   = "0.33.0"
+chia-sdk-signer = "0.33.0"
+anyhow          = "1"
+hex-literal     = "0.4.1"
+rstest          = "0.18"
+bip39           = "2.2.2"
+
+[profile.release]
+opt-level     = "z"
+lto           = true
+codegen-units = 1
+panic         = "abort"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

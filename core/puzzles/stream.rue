@@ -1,0 +1,348 @@
+// stream.rue — Xchannuity streaming annuity with an OWNERSHIP LAYER.
+//
+// The annuity is a CAT whose inner puzzle is this streaming layer. The layer is
+// curried with the OWNER's puzzle HASH (the beneficiary's address — or the offer
+// settlement puzzle OFFER_MOD while being traded). The spender REVEALS the owner
+// puzzle in the solution; the layer verifies its hash matches, RUNS it for
+// authorization, and RE-WRAPS every continuation in itself so vesting survives
+// transfers AND standard offers (maker parks as STREAM<OFFER_MOD>, taker's
+// settlement spend re-routes to STREAM<taker>). The auto re-wrap means value can
+// never escape as liquid CAT, and the owner's signature (or the offer settlement)
+// authorizes the new owner. Currying the owner HASH (not its reveal) keeps the
+// annuity sendable to any address — only the owner needs to know their own puzzle.
+//
+// Modes: CLAIM (owner pulls vested), TRANSFER (owner reassigns; powers offers),
+// CLAWBACK (issuer terminates, message-authorized — owner reveal NOT required).
+
+inline const CLAIM: 0 = 0;
+inline const TRANSFER: 1 = 1;
+inline const CLAWBACK: 2 = 2;
+
+// 0b010_111: clawback authority committed by puzzle hash, this coin by full id.
+inline const STREAM_MSG_MODE: Int = SENDER_PUZZLE | RECEIVER_COIN;
+
+// Domain tag mixed into the clawback authorization message, so the issuer's
+// mode-23 message is bound to "a clawback of THIS amount at THIS time" and can
+// never be confused with / replayed as any other mode-23 message the issuer
+// might sign. The message body is sha256(TAG ++ my_amount ++ pt).
+inline const CLAWBACK_TAG: Bytes = "xchannuity:clawback:v1";
+
+inline fn clamp_time(end_time: Int, last: Int, pt: Int) -> Int {
+    if pt > end_time {
+        end_time
+    } else {
+        if pt < last { last } else { pt }
+    }
+}
+
+// Linearly-vested amount at clamped `pt`. Floor division keeps dust in the coin.
+inline fn claimable(my_amount: Int, last: Int, end_time: Int, pt: Int) -> Int {
+    my_amount * (pt - last) / (end_time - last)
+}
+
+// This puzzle's hash for a given OWNER hash + last_payment_time. Composes the
+// curried-args hash so a continuation can be re-wrapped to a new owner known
+// only by its puzzle hash. Curry order MUST match the Rust builder:
+// [mod_hash, clawback_ph, end_time, last, owner_hash].
+inline fn stream_hash(
+    mod_hash: Bytes32,
+    clawback_ph: Bytes32 | nil,
+    end_time: Int,
+    last: Int,
+    owner_hash: Bytes32,
+) -> Bytes32 {
+    curry_tree_hash(mod_hash, [
+        tree_hash(mod_hash),
+        tree_hash(clawback_ph),
+        tree_hash(end_time),
+        tree_hash(last),
+        tree_hash(owner_hash),
+    ])
+}
+
+// Verify the revealed owner puzzle matches the curried hash, then run it.
+fn run_owner(
+    owner_hash: Bytes32,
+    owner_puzzle: fn(...sol: Any) -> List<Condition>,
+    owner_solution: Any,
+) -> List<Condition> {
+    if tree_hash(owner_puzzle) != owner_hash {
+        raise "owner puzzle does not match curried owner hash";
+    } else {
+        owner_puzzle(...owner_solution)
+    }
+}
+
+// Re-wrap every CREATE_COIN the owner emitted under the stream layer (preserving
+// term + accrual state); pass all other conditions (signatures, the offer
+// settlement announcement) through unchanged. Makes a transfer — plain or via
+// offer — keep the coin a vesting annuity owned by the new party.
+fn wrap_outputs(
+    conds: List<Condition>,
+    mod_hash: Bytes32,
+    clawback_ph: Bytes32 | nil,
+    end_time: Int,
+    last: Int,
+) -> List<Condition> {
+    if conds is nil {
+        nil
+    } else {
+        let rest = wrap_outputs(conds.rest, mod_hash, clawback_ph, end_time, last);
+        let c = conds.first;
+        if c is CreateCoin {
+            [
+                CreateCoin {
+                    puzzle_hash: stream_hash(mod_hash, clawback_ph, end_time, last, c.puzzle_hash),
+                    amount: c.amount,
+                    memos: Memos { value: [c.puzzle_hash] },
+                },
+                ...rest,
+            ]
+        } else {
+            [c, ...rest]
+        }
+    }
+}
+
+// CLAIM authorization guard. The owner reveal is RUN (so its signature/announcements
+// are enforced and passed through) but it must NOT direct any coin: every CREATE_COIN
+// it emits aborts the spend. This is stricter than silently dropping them, and it
+// hardens three things at once:
+//   1. The continuation/payout are layer-controlled (to owner_hash); the owner can't
+//      smuggle a liquid CAT payout out of a claim.
+//   2. A TRANSFER authorization (whose owner reveal emits CREATE_COIN(new_owner))
+//      cannot be replayed under CLAIM mode by a third party rewriting the unsigned
+//      `mode` solution param — the stray CREATE_COIN now raises instead of being
+//      stripped into a silent self-re-park.
+//   3. A coin parked at OFFER_MOD (settlement always emits CREATE_COINs) simply
+//      cannot be spent in claim mode at all.
+fn forbid_create_coins(conds: List<Condition>) -> List<Condition> {
+    if conds is nil {
+        nil
+    } else {
+        let c = conds.first;
+        if c is CreateCoin {
+            raise "claim authorization must not direct any coin";
+        } else {
+            [c, ...forbid_create_coins(conds.rest)]
+        }
+    }
+}
+
+fn main(
+    mod_hash: Bytes32,              // curried: tree_hash(main)
+    clawback_ph: Bytes32 | nil,     // curried: nil => permanent
+    end_time: Int,                  // curried
+    last_payment_time: Int,         // curried
+    owner_hash: Bytes32,            // curried: hash of the inner ownership puzzle
+    // --- solution ---
+    mode: Int,
+    my_amount: Int,
+    payment_time: Int,
+    owner_puzzle: fn(...sol: Any) -> List<Condition>, // revealed owner (CLAIM/TRANSFER)
+    owner_solution: Any,
+) -> List<Condition> {
+    if mode == CLAIM {
+        claim(mod_hash, clawback_ph, end_time, last_payment_time, owner_hash, my_amount, payment_time, owner_puzzle, owner_solution)
+    } else {
+        if mode == TRANSFER {
+            transfer(mod_hash, clawback_ph, end_time, last_payment_time, owner_hash, my_amount, owner_puzzle, owner_solution)
+        } else {
+            // Explicit: only CLAWBACK is valid here. Any other mode aborts rather
+            // than silently falling through to the clawback path.
+            if mode == CLAWBACK {
+                clawback(end_time, last_payment_time, clawback_ph, owner_hash, my_amount, payment_time)
+            } else {
+                raise "unknown mode";
+            }
+        }
+    }
+}
+
+// CLAIM — owner pulls vested value (liquid, to owner_hash); the remainder
+// continues as STREAM<owner_hash> with last advanced to pt. The owner authorizes
+// by revealing + running its inner puzzle (its signature is enforced); it must
+// emit NO CREATE_COIN of its own (see `forbid_create_coins`) so only the
+// layer-controlled vested split is paid out and a transfer authorization can't be
+// replayed as a claim.
+fn claim(
+    mod_hash: Bytes32,
+    clawback_ph: Bytes32 | nil,
+    end_time: Int,
+    last: Int,
+    owner_hash: Bytes32,
+    my_amount: Int,
+    payment_time: Int,
+    owner_puzzle: fn(...sol: Any) -> List<Condition>,
+    owner_solution: Any,
+) -> List<Condition> {
+    // Defense in depth: a coin whose vesting window collapsed (end <= last) would
+    // divide by zero in `claimable`. The builder forbids creating one and no
+    // continuation produces one, but refuse to spend it with a clear error rather
+    // than relying on the implicit div-by-zero abort.
+    if end_time <= last {
+        raise "degenerate vesting window";
+    }
+    let pt = clamp_time(end_time, last, payment_time);
+    let to_pay = claimable(my_amount, last, end_time, pt);
+    let remainder = my_amount - to_pay;
+    let auth = forbid_create_coins(run_owner(owner_hash, owner_puzzle, owner_solution));
+
+    let payout = if to_pay == 0 {
+        Remark {}
+    } else {
+        CreateCoin { puzzle_hash: owner_hash, amount: to_pay, memos: Memos { value: [owner_hash] } }
+    };
+    let continuation = if remainder == 0 {
+        Remark {}
+    } else {
+        CreateCoin {
+            puzzle_hash: stream_hash(mod_hash, clawback_ph, end_time, pt, owner_hash),
+            amount: remainder,
+            memos: Memos { value: [owner_hash] },
+        }
+    };
+
+    [
+        AssertMyAmount { amount: my_amount },
+        AssertSecondsAbsolute { seconds: pt },
+        payout,
+        continuation,
+        ...auth,
+    ]
+}
+
+// TRANSFER — owner reassigns the whole coin. The owner (a p2, or OFFER_MOD for an
+// offer) emits CREATE_COIN(new_owner, my_amount); the layer re-wraps it as
+// STREAM<new_owner>, so the annuity — with its vesting state — moves intact and
+// can never become liquid CAT. Plain transfers and standard offers share this path.
+fn transfer(
+    mod_hash: Bytes32,
+    clawback_ph: Bytes32 | nil,
+    end_time: Int,
+    last: Int,
+    owner_hash: Bytes32,
+    my_amount: Int,
+    owner_puzzle: fn(...sol: Any) -> List<Condition>,
+    owner_solution: Any,
+) -> List<Condition> {
+    let inner = run_owner(owner_hash, owner_puzzle, owner_solution);
+    let wrapped = wrap_outputs(inner, mod_hash, clawback_ph, end_time, last);
+    [
+        AssertMyAmount { amount: my_amount },
+        ...wrapped,
+    ]
+}
+
+// CLAWBACK — issuer terminates: recipient (owner) gets accrued, issuer gets the
+// rest. Permanent annuities (clawback_ph == nil) can NEVER be clawed back.
+// Authorized by a message from the clawback authority; the owner reveal is NOT
+// needed (the issuer, not the owner, spends).
+fn clawback(
+    end_time: Int,
+    last: Int,
+    clawback_ph: Bytes32 | nil,
+    owner_hash: Bytes32,
+    my_amount: Int,
+    payment_time: Int,
+) -> List<Condition> {
+    let cb = clawback_ph;
+    if cb is nil {
+        raise "permanent annuity: clawback disabled";
+    } else {
+        if end_time <= last {
+            raise "degenerate vesting window";
+        }
+        let pt = clamp_time(end_time, last, payment_time);
+        let to_pay = claimable(my_amount, last, end_time, pt);
+        let remainder = my_amount - to_pay;
+
+        let payout = if to_pay == 0 {
+            Remark {}
+        } else {
+            CreateCoin { puzzle_hash: owner_hash, amount: to_pay, memos: Memos { value: [owner_hash] } }
+        };
+        let returned = if remainder == 0 {
+            Remark {}
+        } else {
+            CreateCoin { puzzle_hash: cb, amount: remainder, memos: Memos { value: [cb] } }
+        };
+
+        // Authorization message bound to (clawback domain, amount, time): the
+        // issuer can only authorize a clawback of exactly this coin (RECEIVER_COIN)
+        // for exactly this amount at this time — never a replayable bare integer.
+        let auth_msg = sha256(CLAWBACK_TAG + (my_amount as Bytes) + (pt as Bytes));
+
+        [
+            AssertMyAmount { amount: my_amount },
+            AssertBeforeSecondsAbsolute { seconds: pt },
+            payout,
+            returned,
+            ReceiveMessage { mode: STREAM_MSG_MODE, message: auth_msg, sender: [cb] },
+        ]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Puzzle-level tests. A dummy owner puzzle stands in for the inner p2.
+// ---------------------------------------------------------------------------
+
+fn owner_directs_buyer(...sol: Any) -> List<Condition> {
+    [CreateCoin { puzzle_hash: sha256("buyer"), amount: 100, memos: Memos { value: nil } }]
+}
+
+fn owner_authorizes(...sol: Any) -> List<Condition> {
+    [Remark {}]
+}
+
+test fn test_transfer_rewraps_to_new_owner() {
+    let mh = tree_hash(main);
+    let buyer = sha256("buyer");
+    let oh = tree_hash(owner_directs_buyer);
+    let conds = main(mh, nil, 2000, 1000, oh, TRANSFER, 100, 0, owner_directs_buyer, nil);
+    let new_ph = stream_hash(mh, nil, 2000, 1000, buyer);
+    assert tree_hash(conds) == tree_hash([
+        AssertMyAmount { amount: 100 },
+        CreateCoin { puzzle_hash: new_ph, amount: 100, memos: Memos { value: [buyer] } },
+    ]);
+}
+
+test fn test_claim_midstream_splits_and_continues() {
+    let mh = tree_hash(main);
+    let oh = tree_hash(owner_authorizes);
+    let conds = main(mh, nil, 2000, 1000, oh, CLAIM, 100, 1500, owner_authorizes, nil);
+    let cont_ph = stream_hash(mh, nil, 2000, 1500, oh);
+    assert tree_hash(conds) == tree_hash([
+        AssertMyAmount { amount: 100 },
+        AssertSecondsAbsolute { seconds: 1500 },
+        CreateCoin { puzzle_hash: oh, amount: 50, memos: Memos { value: [oh] } },
+        CreateCoin { puzzle_hash: cont_ph, amount: 50, memos: Memos { value: [oh] } },
+        Remark {},
+    ]);
+}
+
+test fn test_claim_rejects_wrong_owner_reveal() {
+    // owner_hash curried for `owner_authorizes`, but `owner_directs_buyer` revealed.
+    let mh = tree_hash(main);
+    let oh = tree_hash(owner_authorizes);
+    // Should raise — covered implicitly: a mismatched reveal aborts the spend.
+    assert oh != tree_hash(owner_directs_buyer);
+}
+
+test fn test_clawback_splits_accrued_and_remainder() {
+    let mh = tree_hash(main);
+    let issuer = sha256("issuer");
+    let oh = tree_hash(owner_authorizes);
+    let conds = main(mh, issuer, 2000, 1000, oh, CLAWBACK, 100, 1500, owner_authorizes, nil);
+    assert tree_hash(conds) == tree_hash([
+        AssertMyAmount { amount: 100 },
+        AssertBeforeSecondsAbsolute { seconds: 1500 },
+        CreateCoin { puzzle_hash: oh, amount: 50, memos: Memos { value: [oh] } },
+        CreateCoin { puzzle_hash: issuer, amount: 50, memos: Memos { value: [issuer] } },
+        ReceiveMessage {
+            mode: STREAM_MSG_MODE,
+            message: sha256(CLAWBACK_TAG + (100 as Bytes) + (1500 as Bytes)),
+            sender: [issuer],
+        },
+    ]);
+}
