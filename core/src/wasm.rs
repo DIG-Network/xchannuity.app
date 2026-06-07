@@ -5,8 +5,7 @@
 
 use chia_bls::Signature;
 use chia_protocol::Bytes32;
-use chia_puzzle_types::cat::CatArgs;
-use chia_sdk_driver::{Cat, CatInfo, SpendContext};
+use chia_sdk_driver::SpendContext;
 use chia_sdk_utils::Address;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
@@ -18,7 +17,8 @@ use crate::dto::{
     self, BundleJson, CreateRequest, EncodeOfferRequest, FlowRequest, OfferDraftJson,
     OpenOfferRequest, TakeFromOfferRequest,
 };
-use crate::info::AnnuityInfo;
+use crate::layers::cat::{CatArgs, Cat, CatInfo};
+use crate::layers::stream::StreamLayer;
 
 fn je<E: std::fmt::Display>(e: E) -> JsValue {
     JsValue::from_str(&e.to_string())
@@ -58,7 +58,7 @@ pub fn annuity_inner_puzzle_hash(
     end_time: u64,
     last_payment_time: u64,
 ) -> Result<String, JsValue> {
-    let info = AnnuityInfo::new(
+    let info = StreamLayer::new(
         parse_b32(&recipient_hex)?,
         parse_clawback(clawback_hex)?,
         end_time,
@@ -78,7 +78,7 @@ pub fn annuity_cat_puzzle_hash(
     end_time: u64,
     last_payment_time: u64,
 ) -> Result<String, JsValue> {
-    let info = AnnuityInfo::new(
+    let info = StreamLayer::new(
         parse_b32(&recipient_hex)?,
         parse_clawback(clawback_hex)?,
         end_time,
@@ -98,7 +98,7 @@ pub fn claimable_now(
     now: u64,
 ) -> u64 {
     // recipient/clawback don't affect the math; use placeholders
-    let info = AnnuityInfo::new(Bytes32::default(), None, end_time, last_payment_time);
+    let info = StreamLayer::new(Bytes32::default(), None, end_time, last_payment_time);
     info.claimable(my_amount, now)
 }
 
@@ -168,8 +168,8 @@ fn bundle_js(b: UnsignedBundle) -> Result<JsValue, JsValue> {
     to_value(&BundleJson::from(b)).map_err(je)
 }
 
-fn info_from(p: &dto::AnnuityParamsJson) -> Result<AnnuityInfo, JsValue> {
-    Ok(AnnuityInfo::new(
+fn info_from(p: &dto::AnnuityParamsJson) -> Result<StreamLayer, JsValue> {
+    Ok(StreamLayer::new(
         dto::b32(&p.recipient)?,
         dto::opt_b32(&p.clawback_ph)?,
         p.end_time,

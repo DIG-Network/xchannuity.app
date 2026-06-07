@@ -10,8 +10,7 @@ use chia_sdk_driver::{SpendContext, StandardLayer, SpendWithConditions};
 use chia_sdk_types::{Condition, Conditions};
 use clvmr::NodePtr;
 
-use xchannuity_core::info::StreamSolution;
-use xchannuity_core::AnnuityInfo;
+use xchannuity_core::layers::stream::{StreamLayer, StreamSolution};
 
 #[test]
 fn claim_midstream_layout_matches_rue() -> anyhow::Result<()> {
@@ -20,7 +19,7 @@ fn claim_midstream_layout_matches_rue() -> anyhow::Result<()> {
     // The owner is a standard p2; owner_hash = its curried tree hash.
     let owner_pk = PublicKey::default();
     let recipient: Bytes32 = StandardArgs::curry_tree_hash(owner_pk).into();
-    let info = AnnuityInfo::new(recipient, None, 2000, 1000);
+    let info = StreamLayer::new(recipient, None, 2000, 1000);
 
     // CLAIM solution: reveal the owner p2 spent with empty conditions (emits only
     // its AGG_SIG; the layer strips any CREATE_COIN it would emit).

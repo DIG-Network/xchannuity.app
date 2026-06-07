@@ -14,12 +14,12 @@ use chia_sdk_driver::{DriverError, Spend, SpendContext, SpendWithConditions, Sta
 use chia_sdk_types::Conditions;
 use clvmr::NodePtr;
 
-use crate::info::{AnnuityInfo, StreamSolution};
+use crate::layers::stream::{StreamLayer, StreamSolution};
 
 /// Build the inner annuity spend (curried puzzle + already-allocated solution).
 pub fn inner_spend(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     solution: StreamSolution<NodePtr, NodePtr>,
 ) -> Result<Spend, DriverError> {
     let puzzle = info.construct_puzzle(ctx)?;

@@ -31,7 +31,7 @@ fn cat_stream_parse_round_trips() {
         .unwrap()
         .expect("parses as CatLayer<StreamLayer>");
     assert_eq!(parsed.asset_id, asset_id);
-    assert_eq!(parsed.inner_puzzle.owner_puzzle_hash(), fixture().owner_puzzle_hash());
+    assert_eq!(parsed.inner_puzzle.recipient, fixture().recipient);
     assert_eq!(parsed.inner_puzzle.clawback_ph, fixture().clawback_ph);
     assert_eq!(parsed.inner_puzzle.end_time, END);
     assert_eq!(parsed.inner_puzzle.last_payment_time, START);

@@ -52,11 +52,9 @@ pub struct StreamSolution<P, S> {
 
 /// High-level annuity parameters (the curried state minus the constant mod hash).
 /// `recipient` is the OWNER's puzzle hash (their address / p2 hash) = `owner_hash`.
-/// Exposed via the `layers` module as `StreamLayer`; historically known as `AnnuityInfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamLayer {
     /// Owner's puzzle hash — the address the annuity pays to (= `owner_hash` in curry).
-    /// Also accessible as `owner_puzzle_hash` via the method of that name.
     pub recipient: Bytes32,
     pub clawback_ph: Option<Bytes32>,
     pub end_time: u64,
@@ -64,8 +62,7 @@ pub struct StreamLayer {
 }
 
 impl StreamLayer {
-    /// Construct a new `StreamLayer`.  Parameter order matches the historical
-    /// `AnnuityInfo::new(recipient, clawback_ph, end_time, last_payment_time)`.
+    /// Construct a new `StreamLayer`.
     pub fn new(
         recipient: Bytes32,
         clawback_ph: Option<Bytes32>,
@@ -73,12 +70,6 @@ impl StreamLayer {
         last_payment_time: u64,
     ) -> Self {
         Self { recipient, clawback_ph, end_time, last_payment_time }
-    }
-
-    /// The owner's puzzle hash — alias for the `recipient` field, used by the
-    /// Layer-API surface and any code that prefers the longer, descriptive name.
-    pub fn owner_puzzle_hash(&self) -> Bytes32 {
-        self.recipient
     }
 
     /// Reconstruct a `StreamLayer` from parsed curried args (drops the constant
@@ -104,8 +95,8 @@ impl StreamLayer {
         vec![
             owner,
             clawback,
-            crate::spend::u64_to_atom(self.last_payment_time),
-            crate::spend::u64_to_atom(self.end_time),
+            crate::constants::u64_to_atom(self.last_payment_time),
+            crate::constants::u64_to_atom(self.end_time),
         ]
     }
 

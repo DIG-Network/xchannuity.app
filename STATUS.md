@@ -17,7 +17,7 @@ xchannuity.app/
 │   │   └── stream.rue.hash          # tree hash 39ec8ca9…5046 (committed)
 │   ├── src/
 │   │   ├── layers/             # one file per puzzle boundary, auditable in isolation:
-│   │   │   ├── cat.rs          #   AUDITED: SDK CAT re-export (no custom logic)
+│   │   │   ├── cat.rs          #   AUDITED: SDK CAT re-export (Cat/CatInfo/CatLayer/CatSpend/CatArgs)
 │   │   │   ├── owner.rs        #   AUDITED: owner-auth StreamSolution builders (StandardLayer/settlement)
 │   │   │   ├── clawback.rs     #   CUSTOM: issuer mode-23 message + nil-owner clawback solution
 │   │   │   └── stream.rs       #   CUSTOM: StreamLayer = curried state + math + `impl Layer`
@@ -26,8 +26,7 @@ xchannuity.app/
 │   │   │   ├── spend.rs        #   layers → create/claim/transfer/clawback/offer bundles
 │   │   │   └── discovery.rs    #   parse parent spend via CatLayer<StreamLayer> → live coin
 │   │   ├── {constants,assets,dto,error,wasm}.rs
-│   │   ├── lib.rs              # re-export facade: crate::builders/discovery + AnnuityInfo=StreamLayer
-│   │   └── {info,spend}.rs     # compat shims re-exporting from layers/
+│   │   └── lib.rs              # declares real modules + `pub use error::{Error, Result}`
 │   └── tests/{roundtrip,adversarial,builders,exploits,redteam,layers}.rs
 └── app/                            # Next.js 15 static-export dApp (cXCH pattern)
     ├── next.config.ts · tsconfig.json · package.json
@@ -63,7 +62,9 @@ xchannuity.app/
   Each puzzle boundary is its own auditable module under `src/layers/` (SDK-backed layers are
   thin re-exports; the custom `stream.rs` holds all bespoke logic); `src/composition/` is the
   only place layers assemble (puzzle hashes / spend bundles / discovery). `StreamLayer` carries
-  the curried state + vesting math + `impl Layer`; `AnnuityInfo` is an alias for it.
+  the curried state + vesting math + `impl Layer`. No compat shims — all call-sites (src + tests)
+  use canonical `layers::*` / `composition::*` paths. `u64_to_atom` lives in `constants`; CAT
+  primitives route through `layers::cat`; `lib.rs` declares real modules + the error re-export only.
 - `StreamLayer` mirrors the puzzle; `inner_puzzle_hash` agrees byte-for-byte (proven by round-trip
   test + the `layers.rs` construct-vs-curry-hash + CatLayer<StreamLayer> parse round-trip guards).
 - `composition/spend.rs`: the `build_*` flows compose owner-auth + stream + CAT into spend bundles.
@@ -71,7 +72,7 @@ xchannuity.app/
   `annuity_cat_puzzle_hash`, `claimable_now`, `aggregate_signatures`.
 - WASM-safe: chia-sdk **sub-crates** (`chia-sdk-driver/types/utils` 0.33), not the umbrella crate.
 
-### Tests — `cargo test` → 44 pass (+ 4 `rue test`)
+### Tests — `cargo test` → 46 pass (+ 4 `rue test`)
 - `roundtrip.rs` (1): runs the curried puzzle in CLVM; outputs match the Rue reference (layout + vesting math).
 - `adversarial.rs` (13): on the `chia-sdk-test` simulator (real CLVM + BLS).
 - `builders.rs` (7): allow-list guard rejects unsupported assets; create→claim→transfer end-to-end

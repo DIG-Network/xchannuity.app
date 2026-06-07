@@ -11,12 +11,12 @@ use chia_sdk_driver::{decode_offer, encode_offer, Cat, SpendContext, StandardLay
 use chia_sdk_test::Simulator;
 use chia_sdk_types::Conditions;
 
-use xchannuity_core::builders::{
+use xchannuity_core::composition::discovery::child_from_parent_spend;
+use xchannuity_core::composition::spend::{
     build_claim, build_create, build_create_inner, build_open_offer, build_take_offer,
     build_transfer, take_from_offer,
 };
-use xchannuity_core::discovery::child_from_parent_spend;
-use xchannuity_core::info::AnnuityInfo;
+use xchannuity_core::layers::stream::StreamLayer;
 use xchannuity_core::Error;
 
 #[test]
@@ -69,7 +69,7 @@ fn create_then_claim_then_transfer_through_builders() -> anyhow::Result<()> {
     let stream_id = bundle.stream_id;
     sim.spend_coins(bundle.coin_spends, &[creator.sk.clone()])?;
 
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info = StreamLayer::new(owner.puzzle_hash, None, end, start);
     let inner_ph: Bytes32 = info.inner_puzzle_hash().into();
     let fee = principal * 50 / 10_000;
     let annuity_amount = principal - fee;
@@ -170,7 +170,7 @@ fn create_funding_split_across_two_keys() -> anyhow::Result<()> {
     sim.spend_coins(bundle.coin_spends, &[key_a.sk.clone(), key_b.sk.clone()])?;
 
     // The annuity coin (lead = coin_a) exists with the full principal less fee.
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info = StreamLayer::new(owner.puzzle_hash, None, end, start);
     let fee = principal * 50 / 10_000;
     let annuity_amount = principal - fee;
     let annuity_ph: Bytes32 = CatArgs::curry_tree_hash(asset_id, info.inner_puzzle_hash()).into();
@@ -228,7 +228,7 @@ fn discover_from_create_then_from_claim() -> anyhow::Result<()> {
     assert_eq!(d.coin.amount, annuity_amount);
 
     // CLAIM mid-term, then DISCOVER the continuation (Case A: parent is the annuity)
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info = StreamLayer::new(owner.puzzle_hash, None, end, start);
     sim.set_next_timestamp(1500)?;
     let claim = build_claim(ctx, &info, d.coin, d.lineage_proof, asset_id, owner.pk, 1500)?;
     let claim_spends = claim.coin_spends.clone();
@@ -282,7 +282,7 @@ fn transfer_preserves_vesting_no_early_access() -> anyhow::Result<()> {
     let eve = child_from_parent_spend(&mut d0, funding.coin, pr, sol)?.unwrap();
 
     // owner claims at 1500 → vested 49_750, remaining 49_750, last advances to 1500
-    let info0 = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info0 = StreamLayer::new(owner.puzzle_hash, None, end, start);
     sim.set_next_timestamp(1500)?;
     let claim = build_claim(ctx, &info0, eve.coin, eve.lineage_proof, asset_id, owner.pk, 1500)?;
     let claim_spends = claim.coin_spends.clone();
@@ -297,7 +297,7 @@ fn transfer_preserves_vesting_no_early_access() -> anyhow::Result<()> {
     assert_eq!(cont.info.last_payment_time, 1500);
 
     // owner transfers the continuation to the buyer
-    let info1 = AnnuityInfo::new(owner.puzzle_hash, None, end, 1500);
+    let info1 = StreamLayer::new(owner.puzzle_hash, None, end, 1500);
     let xfer = build_transfer(ctx, &info1, cont.coin, cont.lineage_proof, asset_id, owner.pk, buyer.puzzle_hash)?;
     let xfer_spends = xfer.coin_spends.clone();
     sim.spend_coins(xfer.coin_spends, &[owner.sk.clone()])?;
@@ -311,7 +311,7 @@ fn transfer_preserves_vesting_no_early_access() -> anyhow::Result<()> {
     assert_eq!(xfered.coin.amount, net - vested0, "transfer must PRESERVE the reduced amount (no reset)");
 
     // EARLY-ACCESS ATTEMPT: buyer tries to claim as-of END while the chain is ~1500 → must fail.
-    let info_buyer = AnnuityInfo::new(buyer.puzzle_hash, None, end, 1500);
+    let info_buyer = StreamLayer::new(buyer.puzzle_hash, None, end, 1500);
     let attempt: anyhow::Result<()> = (|| {
         let b = build_claim(ctx, &info_buyer, xfered.coin, xfered.lineage_proof, asset_id, buyer.pk, end)?;
         sim.spend_coins(b.coin_spends, &[buyer.sk.clone()])?;
@@ -379,7 +379,7 @@ fn open_offer_filled_by_arbitrary_taker() -> anyhow::Result<()> {
     let (pr, sol) = (d0.alloc(&cs.puzzle_reveal)?, d0.alloc(&cs.solution)?);
     let eve = child_from_parent_spend(&mut d0, funding.coin, pr, sol)?.unwrap();
     assert_eq!(eve.coin.amount, net);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info = StreamLayer::new(owner.puzzle_hash, None, end, start);
 
     // MAKER: build the open offer — the maker's p2 parks the annuity under the
     // settlement puzzle, gated on `xch_price` to the owner. (Maker signs.)
@@ -411,7 +411,7 @@ fn open_offer_filled_by_arbitrary_taker() -> anyhow::Result<()> {
 
     // The parked coin: CAT<STREAM<SETTLEMENT>>, parent = eve, amount = net.
     let settle_ph = Bytes32::from(SETTLEMENT_PAYMENT_HASH);
-    let parked_info = AnnuityInfo::new(settle_ph, None, end, start);
+    let parked_info = StreamLayer::new(settle_ph, None, end, start);
     let parked_ph: Bytes32 = CatArgs::curry_tree_hash(asset_id, parked_info.inner_puzzle_hash()).into();
     let parked_coin = Coin::new(eve.coin.coin_id(), parked_ph, net);
     let parked_lineage = LineageProof {
@@ -500,7 +500,7 @@ fn offer1_round_trips_and_fills() -> anyhow::Result<()> {
     let (pr, sol) = (d0.alloc(&cs.puzzle_reveal)?, d0.alloc(&cs.solution)?);
     let eve = child_from_parent_spend(&mut d0, funding.coin, pr, sol)?.unwrap();
     assert_eq!(eve.coin.amount, net);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, end, start);
+    let info = StreamLayer::new(owner.puzzle_hash, None, end, start);
 
     // MAKER: build the complete open offer, encode it to an offer1 string.
     let offer = build_open_offer(
@@ -546,7 +546,7 @@ fn offer1_round_trips_and_fills() -> anyhow::Result<()> {
         eve.coin.coin_id(),
         CatArgs::curry_tree_hash(
             asset_id,
-            AnnuityInfo::new(Bytes32::from(SETTLEMENT_PAYMENT_HASH), None, end, start)
+            StreamLayer::new(Bytes32::from(SETTLEMENT_PAYMENT_HASH), None, end, start)
                 .inner_puzzle_hash(),
         )
         .into(),

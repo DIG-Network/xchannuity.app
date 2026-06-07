@@ -3,19 +3,18 @@
 //! puzzle.
 //!
 //! The dApp walks: getCoinRecordsByHint(recipient) → for each unspent coin,
-//! fetch its parent's puzzle+solution → this parser → the live AnnuityInfo
+//! fetch its parent's puzzle+solution → this parser → the live StreamLayer
 //! (with the current last_payment_time / recipient) + a lineage proof.
 
 use chia_protocol::{Bytes, Bytes32, Coin};
-use chia_puzzle_types::cat::CatArgs;
 use chia_puzzle_types::{LineageProof, Memos};
-use chia_sdk_driver::{CatLayer, HashedPtr, Layer, Puzzle, SpendContext};
+use chia_sdk_driver::{HashedPtr, Layer, Puzzle, SpendContext};
 use chia_sdk_types::Condition;
 use clvmr::op_utils::u64_from_bytes;
 use clvmr::NodePtr;
 
 use crate::error::{Error, Result};
-use crate::info::AnnuityInfo;
+use crate::layers::cat::{CatArgs, CatLayer};
 use crate::layers::stream::StreamLayer;
 
 const MODE_CLAIM: u8 = 0;
@@ -26,12 +25,12 @@ const MODE_TRANSFER: u8 = 1;
 pub struct Discovered {
     pub coin: Coin,
     pub asset_id: Bytes32,
-    pub info: AnnuityInfo,
+    pub info: StreamLayer,
     pub lineage_proof: LineageProof,
 }
 
-/// Reconstruct AnnuityInfo from launch-hint memos `[recipient, clawback, last, end]`.
-fn info_from_memos(memos: &[Bytes]) -> Option<AnnuityInfo> {
+/// Reconstruct StreamLayer from launch-hint memos `[recipient, clawback, last, end]`.
+fn info_from_memos(memos: &[Bytes]) -> Option<StreamLayer> {
     if memos.len() < 4 {
         return None;
     }
@@ -43,7 +42,7 @@ fn info_from_memos(memos: &[Bytes]) -> Option<AnnuityInfo> {
     };
     let last_payment_time = u64_from_bytes(memos[2].as_ref());
     let end_time = u64_from_bytes(memos[3].as_ref());
-    Some(AnnuityInfo::new(recipient, clawback_ph, end_time, last_payment_time))
+    Some(StreamLayer::new(recipient, clawback_ph, end_time, last_payment_time))
 }
 
 pub fn child_from_parent_spend(
@@ -57,7 +56,7 @@ pub fn child_from_parent_spend(
     // --- Case A: parent IS a CAT-wrapped annuity (claim/transfer recreated it) ---
     if let Some(cat) = CatLayer::<StreamLayer>::parse_puzzle(&*ctx, parent_puzzle)? {
         let asset_id = cat.asset_id;
-        let parent_info = cat.inner_puzzle; // StreamLayer (= AnnuityInfo)
+        let parent_info = cat.inner_puzzle; // StreamLayer (= StreamLayer)
         // The puzzle is now a confirmed CAT<StreamLayer>, so its solution MUST be a
         // well-formed CatSolution — a parse failure here is a data-integrity error,
         // not an ambiguous puzzle type, so propagate it (`?`) rather than swallow it.
@@ -75,7 +74,7 @@ pub fn child_from_parent_spend(
                             Error::Custom("transfer continuation not found".into())
                         })?;
                 Some((
-                    AnnuityInfo { recipient: new_recipient, ..parent_info },
+                    StreamLayer { recipient: new_recipient, ..parent_info },
                     parent_coin.amount,
                 ))
             }
@@ -86,7 +85,7 @@ pub fn child_from_parent_spend(
                 if remainder == 0 {
                     None
                 } else {
-                    Some((AnnuityInfo { last_payment_time: pt, ..parent_info }, remainder))
+                    Some((StreamLayer { last_payment_time: pt, ..parent_info }, remainder))
                 }
             }
             _ => None, // clawback terminates the annuity
@@ -152,7 +151,7 @@ pub fn child_from_parent_spend(
 /// owner hash recorded in its first memo. Returns that new owner hash.
 fn transfer_new_owner(
     ctx: &mut SpendContext,
-    parent_info: &AnnuityInfo,
+    parent_info: &StreamLayer,
     asset_id: Bytes32,
     puzzle_reveal: NodePtr,
     solution: NodePtr,
@@ -174,7 +173,7 @@ fn transfer_new_owner(
             continue;
         };
         let owner_hash = Bytes32::new(owner_hash);
-        let candidate = AnnuityInfo { recipient: owner_hash, ..*parent_info };
+        let candidate = StreamLayer { recipient: owner_hash, ..*parent_info };
         let cat_ph: Bytes32 =
             CatArgs::curry_tree_hash(asset_id, candidate.inner_puzzle_hash()).into();
         if cc.puzzle_hash == cat_ph {

@@ -20,11 +20,9 @@ use chia_sdk_driver::{Cat, CatSpend, SpendContext, StandardLayer};
 use chia_sdk_test::Simulator;
 use chia_sdk_types::Conditions;
 
-use xchannuity_core::spend::{
-    authorize_message, claim_solution, clawback_message, clawback_solution, inner_spend,
-    transfer_solution,
-};
-use xchannuity_core::AnnuityInfo;
+use xchannuity_core::layers::clawback::{authorize_message, clawback_message, clawback_solution};
+use xchannuity_core::layers::owner::{claim_solution, inner_spend, transfer_solution};
+use xchannuity_core::layers::stream::StreamLayer;
 
 const START: u64 = 1000;
 const END: u64 = 2000;
@@ -35,7 +33,7 @@ const AMOUNT: u64 = 100;
 fn issue_annuity(
     sim: &mut Simulator,
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     amount: u64,
 ) -> anyhow::Result<Cat> {
     let minter = sim.bls(amount);
@@ -62,7 +60,7 @@ fn honest_claim_pays_only_the_recipient() -> anyhow::Result<()> {
     let ctx = &mut SpendContext::new();
 
     let owner = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT)?;
 
     sim.set_next_timestamp(1500)?; // half the window elapsed
@@ -96,7 +94,7 @@ fn honest_transfer_moves_ownership_to_the_new_recipient() -> anyhow::Result<()> 
 
     let owner = sim.bls(0);
     let buyer = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT)?;
 
     // The current owner authorizes a plain transfer to the buyer (its revealed
@@ -128,7 +126,7 @@ fn honest_clawback_splits_accrued_and_remainder() -> anyhow::Result<()> {
 
     let recipient = sim.bls(0);
     let issuer = sim.bls(0);
-    let info = AnnuityInfo::new(recipient.puzzle_hash, Some(issuer.puzzle_hash), END, START);
+    let info = StreamLayer::new(recipient.puzzle_hash, Some(issuer.puzzle_hash), END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT)?;
 
     sim.set_next_timestamp(1400)?; // clawback must land BEFORE payment_time
@@ -165,7 +163,7 @@ fn owner_cannot_claim_unvested_future_value() {
     let ctx = &mut SpendContext::new();
 
     let owner = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1500).unwrap(); // only half the term has elapsed
@@ -192,7 +190,7 @@ fn permanent_annuity_cannot_be_clawed_back() {
 
     let owner = sim.bls(0);
     // clawback_ph = None => permanent, non-clawbackable
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1400).unwrap();
@@ -216,7 +214,7 @@ fn lying_about_coin_amount_fails() {
     let ctx = &mut SpendContext::new();
 
     let owner = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1500).unwrap();
@@ -243,7 +241,7 @@ fn claim_without_owner_signature_fails() {
     let ctx = &mut SpendContext::new();
 
     let owner = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1500).unwrap();
@@ -268,7 +266,7 @@ fn wrong_owner_reveal_is_rejected() {
 
     let owner = sim.bls(0);
     let attacker = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1500).unwrap();
@@ -293,7 +291,7 @@ fn outsider_cannot_forge_a_transfer_to_steal_the_annuity() {
 
     let owner = sim.bls(0);
     let attacker = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     let attempt: anyhow::Result<()> = (|| {
@@ -325,7 +323,7 @@ fn offer_transfer_without_settlement_payment_fails() {
     let ctx = &mut SpendContext::new();
 
     let owner = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     let settlement_id = Bytes32::new([0x42u8; 32]);
@@ -356,7 +354,7 @@ fn transfer_destination_cannot_be_rewritten_by_a_watcher() {
     let owner = sim.bls(0);
     let buyer = sim.bls(0);
     let attacker = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     let attempt: anyhow::Result<()> = (|| {
@@ -405,7 +403,7 @@ fn parked_settlement_coin_cannot_be_drained_as_liquid_cat_via_claim() {
     let ctx = &mut SpendContext::new();
 
     let settle_ph = Bytes32::from(SETTLEMENT_PAYMENT_HASH);
-    let info = AnnuityInfo::new(settle_ph, None, END, START);
+    let info = StreamLayer::new(settle_ph, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
     let attacker = sim.bls(0);
 
@@ -438,7 +436,7 @@ fn transfer_cannot_strip_the_stream_wrapper() -> anyhow::Result<()> {
 
     let owner = sim.bls(0);
     let buyer = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT)?;
 
     let solution = transfer_solution(
