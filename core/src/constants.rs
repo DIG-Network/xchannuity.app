@@ -1,7 +1,7 @@
 //! Compiled-puzzle constants. The CLVM hex + tree hash are produced by
 //! `rue build core/puzzles/stream.rue --hex --hash` (rue-cli 0.8.4) and committed.
 
-use chia_protocol::Bytes32;
+use chia_protocol::{Bytes, Bytes32};
 use clvm_utils::TreeHash;
 
 /// Serialized CLVM of `stream.rue` (the `main` mod, before currying).
@@ -50,4 +50,10 @@ pub fn stream_mod_tree_hash() -> TreeHash {
 /// puzzle can recompute its own continuation hash.
 pub fn stream_mod_hash() -> Bytes32 {
     Bytes32::new(decode32(STREAM_MOD_HASH_HEX))
+}
+
+/// CLVM-canonical big-endian encoding of a u64, matching Rue's `x as Bytes`
+/// (and the encoding the SDK's own streaming primitive uses).
+pub fn u64_to_atom(v: u64) -> Bytes {
+    Bytes::new(chia_consensus::make_aggsig_final_message::u64_to_bytes(v))
 }

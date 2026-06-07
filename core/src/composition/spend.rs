@@ -17,20 +17,19 @@ use chia_puzzle_types::offer::{NotarizedPayment, Payment, SettlementPaymentsSolu
 use chia_puzzle_types::{LineageProof, Memos};
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{
-    decode_offer, Cat, CatInfo, CatLayer, CatSpend, HashedPtr, Layer, Puzzle, SettlementLayer,
+    decode_offer, HashedPtr, Layer, Puzzle, SettlementLayer,
     Spend, SpendContext, StandardLayer, SpendWithConditions,
 };
 use chia_sdk_types::{announcement_id, tree_hash_notarized_payment, Conditions};
 
 use crate::assets::require_supported;
 use crate::constants::{protocol_fee_puzzle_hash, stream_mod_tree_hash, PROTOCOL_FEE_BPS};
-use crate::discovery::child_from_parent_spend;
+use crate::composition::discovery::child_from_parent_spend;
 use crate::error::{Error, Result};
-use crate::info::{AnnuityInfo, StreamCurry};
-use crate::spend::{
-    authorize_message, claim_solution, clawback_message, clawback_solution, inner_spend,
-    transfer_solution, transfer_solution_with_owner,
-};
+use crate::layers::cat::{Cat, CatInfo, CatLayer, CatSpend};
+use crate::layers::clawback::{authorize_message, clawback_message, clawback_solution};
+use crate::layers::owner::{claim_solution, inner_spend, transfer_solution, transfer_solution_with_owner};
+use crate::layers::stream::{StreamCurry, StreamLayer};
 
 /// An unsigned bundle ready for Sage to partial-sign and the dApp to broadcast.
 pub struct UnsignedBundle {
@@ -161,7 +160,7 @@ pub fn build_create_inner(
     let annuity_amount = principal - fee;
     let change = total - principal;
 
-    let info = AnnuityInfo::new(recipient, clawback_ph, end_time, start_time);
+    let info = StreamLayer::new(recipient, clawback_ph, end_time, start_time);
     let inner_ph: Bytes32 = info.inner_puzzle_hash().into();
     // Launch hints: coin is hinted to `recipient` (first memo) so the beneficiary
     // can find it via getCoinRecordsByHint, and the params are recoverable.
@@ -216,7 +215,7 @@ pub fn build_create_inner(
 #[allow(clippy::too_many_arguments)]
 pub fn build_claim(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     annuity_coin: Coin,
     lineage_proof: LineageProof,
     asset_id: Bytes32,
@@ -238,7 +237,7 @@ pub fn build_claim(
 #[allow(clippy::too_many_arguments)]
 pub fn build_clawback(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     annuity_coin: Coin,
     lineage_proof: LineageProof,
     asset_id: Bytes32,
@@ -261,7 +260,7 @@ pub fn build_clawback(
 #[allow(clippy::too_many_arguments)]
 pub fn build_transfer(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     annuity_coin: Coin,
     lineage_proof: LineageProof,
     asset_id: Bytes32,
@@ -286,7 +285,7 @@ pub fn build_transfer(
 #[allow(clippy::too_many_arguments)]
 pub fn build_open_offer(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     annuity_coin: Coin,
     lineage_proof: LineageProof,
     asset_id: Bytes32,
@@ -351,7 +350,7 @@ pub fn build_open_offer(
 #[allow(clippy::too_many_arguments)]
 pub fn build_take_offer(
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     parked_coin: Coin,
     parked_lineage: LineageProof,
     asset_id: Bytes32,
@@ -363,7 +362,7 @@ pub fn build_take_offer(
 ) -> Result<UnsignedBundle> {
     // The parked coin is currently owned by SETTLEMENT_PAYMENT_HASH.
     let settle_ph = Bytes32::from(SETTLEMENT_PAYMENT_HASH);
-    let parked_info = AnnuityInfo { recipient: settle_ph, ..*info };
+    let parked_info = StreamLayer { recipient: settle_ph, ..*info };
     let parked_id = parked_coin.coin_id();
 
     // 1) Taker pays the XCH into the settlement puzzle (recreating change).
@@ -414,7 +413,7 @@ pub fn build_take_offer(
 /// The trade terms recovered by DECODING an `offer1` produced by
 /// `build_open_offer`: everything a taker needs to fill it.
 struct OfferTerms {
-    info: AnnuityInfo,
+    info: StreamLayer,
     asset_id: Bytes32,
     /// The PARKED `CAT<STREAM<SETTLEMENT>>` coin the maker's park spend creates.
     parked_coin: Coin,
@@ -433,7 +432,7 @@ fn parse_offer(ctx: &mut SpendContext, offer: &str) -> Result<OfferTerms> {
     let bundle = decode_offer(offer).map_err(|e| Error::Custom(format!("decode offer: {e}")))?;
 
     let settle_ph = Bytes32::from(SETTLEMENT_PAYMENT_HASH);
-    let mut park: Option<(AnnuityInfo, Bytes32, Coin, LineageProof)> = None;
+    let mut park: Option<(StreamLayer, Bytes32, Coin, LineageProof)> = None;
     let mut requested: Option<(Bytes32, u64)> = None;
 
     for cs in &bundle.coin_spends {
@@ -477,7 +476,7 @@ fn parse_offer(ctx: &mut SpendContext, offer: &str) -> Result<OfferTerms> {
         // curried owner here is the MAKER (the eve owner); `build_take_offer`
         // takes this eve `info` and derives the parked (SETTLEMENT) info itself.
         let sc: StreamCurry = ctx.extract(curried.args)?;
-        let eve_info = AnnuityInfo::from_curry(&sc);
+        let eve_info = StreamLayer::from_curry(&sc);
 
         // Recover the parked child coin + its lineage proof from the park spend.
         let sol = ctx.alloc(&cs.solution)?;

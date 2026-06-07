@@ -7,7 +7,7 @@ use chia_puzzle_types::LineageProof;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsValue;
 
-use crate::builders::UnsignedBundle;
+use crate::composition::spend::UnsignedBundle;
 
 fn err(m: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&m.to_string())
@@ -155,8 +155,8 @@ pub struct OfferDraftJson {
     pub xch_amount: u64,
 }
 
-impl From<crate::builders::OfferUnsigned> for OfferDraftJson {
-    fn from(o: crate::builders::OfferUnsigned) -> Self {
+impl From<crate::composition::spend::OfferUnsigned> for OfferDraftJson {
+    fn from(o: crate::composition::spend::OfferUnsigned) -> Self {
         OfferDraftJson {
             coin_spends: o.coin_spends,
             stream_id: format!("0x{}", hex::encode(o.stream_id)),
@@ -188,8 +188,8 @@ pub struct OfferInspectionJson {
     pub xch_amount: u64,
 }
 
-impl From<crate::builders::OfferInspection> for OfferInspectionJson {
-    fn from(i: crate::builders::OfferInspection) -> Self {
+impl From<crate::composition::spend::OfferInspection> for OfferInspectionJson {
+    fn from(i: crate::composition::spend::OfferInspection) -> Self {
         OfferInspectionJson {
             asset_id: format!("0x{}", hex::encode(i.asset_id)),
             amount: i.amount,
@@ -258,7 +258,7 @@ pub struct DiscoveredJson {
     pub lineage_proof: LineageOut,
 }
 
-pub fn discovered_json(d: &crate::discovery::Discovered) -> DiscoveredJson {
+pub fn discovered_json(d: &crate::composition::discovery::Discovered) -> DiscoveredJson {
     DiscoveredJson {
         coin: CoinOut {
             parent_coin_info: hx(d.coin.parent_coin_info),

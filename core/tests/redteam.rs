@@ -20,9 +20,9 @@ use chia_sdk_driver::{Cat, CatSpend, SpendContext, SpendWithConditions, Standard
 use chia_sdk_test::Simulator;
 use chia_sdk_types::Conditions;
 
-use xchannuity_core::builders::{build_open_offer, build_take_offer};
-use xchannuity_core::spend::{claim_solution, inner_spend, transfer_solution_with_owner};
-use xchannuity_core::AnnuityInfo;
+use xchannuity_core::composition::spend::{build_open_offer, build_take_offer};
+use xchannuity_core::layers::owner::{claim_solution, inner_spend, transfer_solution_with_owner};
+use xchannuity_core::layers::stream::StreamLayer;
 
 const START: u64 = 1000;
 const END: u64 = 2000;
@@ -32,7 +32,7 @@ const AMOUNT: u64 = 100;
 fn issue_annuity(
     sim: &mut Simulator,
     ctx: &mut SpendContext,
-    info: &AnnuityInfo,
+    info: &StreamLayer,
     amount: u64,
 ) -> anyhow::Result<Cat> {
     let minter = sim.bls(amount);
@@ -72,7 +72,7 @@ fn transfer_cannot_inflate_cat_supply() {
     let ctx = &mut SpendContext::new();
     let owner = sim.bls(0);
     let buyer = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     let attempt: anyhow::Result<()> = (|| {
@@ -99,7 +99,7 @@ fn transfer_cannot_melt_and_pocket_value() {
     let ctx = &mut SpendContext::new();
     let owner = sim.bls(0);
     let buyer = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, None, END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, None, END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     let attempt: anyhow::Result<()> = (|| {
@@ -130,7 +130,7 @@ fn claim_continuation_preserves_clawback_and_window() {
     let ctx = &mut SpendContext::new();
     let owner = sim.bls(0);
     let issuer = sim.bls(0);
-    let info = AnnuityInfo::new(owner.puzzle_hash, Some(issuer.puzzle_hash), END, START);
+    let info = StreamLayer::new(owner.puzzle_hash, Some(issuer.puzzle_hash), END, START);
     let annuity = issue_annuity(&mut sim, ctx, &info, AMOUNT).unwrap();
 
     sim.set_next_timestamp(1500).unwrap();
@@ -143,11 +143,11 @@ fn claim_continuation_preserves_clawback_and_window() {
     // Correct continuation: clawback_ph preserved, end unchanged, last advanced to 1500.
     let preserved: Bytes32 = info.after_claim(1500).inner_puzzle_hash().into();
     // A laundered (clawback-stripped) continuation would have THIS hash:
-    let stripped: Bytes32 = AnnuityInfo::new(owner.puzzle_hash, None, END, 1500)
+    let stripped: Bytes32 = StreamLayer::new(owner.puzzle_hash, None, END, 1500)
         .inner_puzzle_hash()
         .into();
     // A window-reset continuation (end pushed out) would have THIS hash:
-    let reset: Bytes32 = AnnuityInfo::new(owner.puzzle_hash, Some(issuer.puzzle_hash), END + 1, 1500)
+    let reset: Bytes32 = StreamLayer::new(owner.puzzle_hash, Some(issuer.puzzle_hash), END + 1, 1500)
         .inner_puzzle_hash()
         .into();
     assert!(
@@ -177,8 +177,8 @@ fn make_open_offer(
     maker_ph: Bytes32,
     maker_pk: chia_bls::PublicKey,
     xch_price: u64,
-) -> anyhow::Result<(Vec<chia_protocol::CoinSpend>, Coin, LineageProof, Bytes32, AnnuityInfo)> {
-    let info = AnnuityInfo::new(maker_ph, None, END, START);
+) -> anyhow::Result<(Vec<chia_protocol::CoinSpend>, Coin, LineageProof, Bytes32, StreamLayer)> {
+    let info = StreamLayer::new(maker_ph, None, END, START);
     let annuity = issue_annuity(sim, ctx, &info, AMOUNT)?;
     let asset_id = annuity.info.asset_id;
 
@@ -199,7 +199,7 @@ fn make_open_offer(
         .collect();
 
     let settle_ph = Bytes32::from(SETTLEMENT_PAYMENT_HASH);
-    let parked_info = AnnuityInfo::new(settle_ph, None, END, START);
+    let parked_info = StreamLayer::new(settle_ph, None, END, START);
     let parked_ph: Bytes32 = CatArgs::curry_tree_hash(asset_id, parked_info.inner_puzzle_hash()).into();
     let parked_coin = Coin::new(annuity.coin.coin_id(), parked_ph, AMOUNT);
     let parked_lineage = LineageProof {

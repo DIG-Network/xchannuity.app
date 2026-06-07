@@ -11,17 +11,11 @@ use chia_sdk_types::Conditions;
 use clvmr::NodePtr;
 
 use crate::constants::{MODE_CLAWBACK, STREAM_MSG_MODE};
-use crate::info::StreamSolution;
+use crate::layers::stream::StreamSolution;
 
 /// Domain tag mixed into the clawback authorization message. MUST byte-match the
 /// Rue `CLAWBACK_TAG` constant in `puzzles/stream.rue`.
 pub const CLAWBACK_TAG: &[u8] = b"xchannuity:clawback:v1";
-
-/// CLVM-canonical big-endian encoding of a u64, matching Rue's `x as Bytes`
-/// (and the encoding the SDK's own streaming primitive uses).
-pub fn u64_to_atom(v: u64) -> Bytes {
-    Bytes::new(chia_consensus::make_aggsig_final_message::u64_to_bytes(v))
-}
 
 /// The clawback authorization message body: `sha256(CLAWBACK_TAG ++ my_amount ++ pt)`
 /// where the integers use the CLVM-canonical atom encoding — byte-identical to the
