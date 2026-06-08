@@ -52,8 +52,18 @@ export function WalletConnectProvider({ children }: { children: ReactNode }) {
       metadata: {
         name: "XCH Annuity",
         description: "Create, transfer, and trade annuities on Chia",
-        url: typeof window !== "undefined" ? window.location.origin : "",
-        icons: ["/icon.svg"],
+        // Pin metadata.url to the page's actual origin (falling back to the
+        // production domain for SSR); WalletConnect/Sage verification flags a
+        // dApp whose declared url/icons differ from where it's served.
+        url: typeof window !== "undefined" ? window.location.origin : "https://xchannuity.app",
+        // Must be an ABSOLUTE URL to a real, fetchable image — the wallet
+        // renders it remotely. The old "/icon.svg" was relative AND nonexistent,
+        // so Sage showed a broken logo.
+        icons: [
+          typeof window !== "undefined"
+            ? `${window.location.origin}/favicon-512.png`
+            : "https://xchannuity.app/favicon-512.png",
+        ],
       },
     })
       .then((c) => {
