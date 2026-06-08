@@ -161,7 +161,7 @@ export function AnnuityCard({
         // prompt a second signed spend that melts it → native XCH.
         if (isXch && claimedLive && claimedMojos > 0) {
           try {
-            await meltClaimed(claimedLive);
+            await meltCmojoPayout(claimedLive, a.recipient);
           } catch {
             // User cancelled or melt failed — claim already landed; the cMOJO is
             // claimable manually later. Don't fail the claim.
@@ -172,28 +172,30 @@ export function AnnuityCard({
       .catch(() => {});
   }
 
-  // Second leg of an XCH claim: melt the just-claimed cMOJO payout → native XCH.
-  // `live` is the annuity coin the claim spent; `claimableMojos` is the cMOJO
-  // amount the claim paid to `a.recipient`.
-  async function meltClaimed(live: RichAnnuity) {
+  // Melt a just-created cMOJO payout coin → native XCH. Used as the second leg
+  // of both flows: a claim (payout inner p2 = the owner, `a.recipient`) and a
+  // clawback (the issuer's reclaimed coin, inner p2 = `a.clawbackPh`). `live` is
+  // the annuity coin that was spent (parent of the payout); `payoutPh` is the
+  // inner p2 puzzle hash the cMOJO was paid to — also where the melted XCH goes.
+  async function meltCmojoPayout(live: RichAnnuity, payoutPh: string) {
     return runSpend({
       title: "Withdraw to XCH",
       confirmLabel: "Melt to XCH",
       prepare: async (report) => {
-        report("Locating the claimed cMOJO coin on-chain…");
-        // The claim spent `live.coin`; the payout coin's parent IS its id.
+        report("Locating the cMOJO payout coin on-chain…");
+        // The spend consumed `live.coin`; the payout coin's parent IS its id.
         const annuityCoinId = coin_id(
           live.coin.parent_coin_info,
           live.coin.puzzle_hash,
           BigInt(live.coin.amount),
         );
         // DISCOVER the real payout coin from the node rather than reconstructing
-        // its id by hand: the claim paid a CAT<cMOJO> coin (inner p2 = a.recipient,
-        // outer ph = cmojoOuterPh(recipient)) whose parent is the spent annuity
+        // its id by hand: the spend paid a CAT<cMOJO> coin (inner p2 = payoutPh,
+        // outer ph = cmojoOuterPh(payoutPh)) whose parent is the spent annuity
         // coin. The node is the source of truth for the exact amount — eliminates
         // the amount/time reconstruction that previously caused UNKNOWN_UNSPENT.
-        // The claim just confirmed; poll briefly to absorb node-indexing lag.
-        const outerPh = cmojoOuterPh(a.recipient);
+        // The spend just confirmed; poll briefly to absorb node-indexing lag.
+        const outerPh = cmojoOuterPh(payoutPh);
         const eq = (x: string, y: string) =>
           x.toLowerCase().replace(/^0x/, "") === y.toLowerCase().replace(/^0x/, "");
         let claimedCoin: { parent_coin_info: string; puzzle_hash: string; amount: number } | undefined;
@@ -226,7 +228,7 @@ export function AnnuityCard({
         report("Resolving authorization…");
         const keys = await getPublicKeys(request);
         const resolver = buildKeyResolver(keys);
-        const ownerKey = await resolveOwnerKey(a.recipient);
+        const ownerKey = await resolveOwnerKey(payoutPh);
 
         report("Selecting an XCH anchor coin…");
         const xch = await getAssetCoins(request, null, null);
@@ -242,8 +244,8 @@ export function AnnuityCard({
         const melt = await meltToXch({
           cmojoCoins: [{ coin: claimedCoin, lineage_proof, synthetic_key: ownerKey }],
           anchorCoins: [{ coin: anchorCoin, synthetic_key: anchorKey }],
-          recipientPh: a.recipient, // native XCH goes to the annuity owner
-          catChangePh: a.recipient,
+          recipientPh: payoutPh, // native XCH goes to whoever received the cMOJO
+          catChangePh: payoutPh,
           meltMojos: BigInt(claimedCoin.amount),
           feeMojos: 0n,
         });
@@ -347,12 +349,16 @@ export function AnnuityCard({
   function doClawback() {
     if (!a.clawbackPh) return;
     const clawbackPh = a.clawbackPh;
+    // Captured from prepare() so the follow-on melt can find the issuer's
+    // reclaimed cMOJO coin (XCH annuities only).
+    let clawedLive: RichAnnuity | null = null;
     runSpend({
       title: `Clawback ${token?.symbol ?? "CAT"} annuity`,
       confirmLabel: "Clawback",
       prepare: async (report) => {
         report("Locating the annuity coin…");
         const live = await resolveLive(a);
+        clawedLive = live;
         report("Resolving clawback authorization…");
         const { ownerKey, owner_coin } = await resolveAuthorizer(clawbackPh);
         report("Building spend bundle…");
@@ -376,8 +382,19 @@ export function AnnuityCard({
         return { built, summary, watchCoinId: watch };
       },
     })
-      .then(() => {
+      .then(async () => {
         toast.success("Clawback confirmed");
+        // XCH annuity: the clawback returned the unvested portion to the issuer
+        // as cMOJO (inner p2 = clawbackPh). Auto-prompt a melt → native XCH, the
+        // same second leg as a claim. `toStream` is the reclaimed amount.
+        if (isXch && clawedLive && toStream > 0) {
+          try {
+            await meltCmojoPayout(clawedLive, clawbackPh);
+          } catch {
+            // Cancelled or melt failed — clawback already landed; the cMOJO is
+            // meltable manually later. Don't fail the clawback.
+          }
+        }
         removeAnnuity(a.streamId);
         onChange();
       })
