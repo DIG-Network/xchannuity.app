@@ -137,10 +137,15 @@ export function AnnuityCard({
           owner_synthetic_key: ownerKey,
           time: t,
         });
-        // The claim pays `claimable` cMOJO to a.recipient. Capture the live coin
-        // + amount for the auto-melt (XCH annuities).
+        // Capture the live coin + the EXACT paid amount for the auto-melt.
+        // CRITICAL: the puzzle pays the vested amount at the clamped claim time
+        // `t` (= now-120), NOT at `now`. The melt reconstructs the payout coin by
+        // id = sha256(parent, ph, amount); using `claimable`@now here makes the
+        // amount (and id) wrong → the melt hits UNKNOWN_UNSPENT. Recompute at `t`
+        // with the coin's actual amount (what build_claim used as my_amount), so
+        // it byte-matches the on-chain payout (claimableMojos mirrors the puzzle).
         claimedLive = live;
-        claimedMojos = claimable;
+        claimedMojos = claimableMojos(Number(live.coin.amount), a.endTime, a.lastPaymentTime, t);
         const watch = coin_id(live.coin.parent_coin_info, live.coin.puzzle_hash, BigInt(live.coin.amount));
         const summary: SpendSummaryLine[] = [
           { label: "Claiming", value: fmt(claimable), strong: true },
