@@ -1,0 +1,21 @@
+{
+  "name": "cmojo-core",
+  "type": "module",
+  "description": "Spend-bundle builder for cMojo, a 1:1 wrapped-XCH CAT2 token on Chia",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DIG-Network/cXCH_DAPP"
+  },
+  "files": [
+    "cmojo_core_bg.wasm",
+    "cmojo_core.js",
+    "cmojo_core.d.ts"
+  ],
+  "main": "cmojo_core.js",
+  "types": "cmojo_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

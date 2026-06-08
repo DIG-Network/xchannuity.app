@@ -15,7 +15,8 @@
     "incremental": true,
     "plugins": [{ "name": "next" }],
     "paths": {
-      "@wasm": ["./wasm-pkg/xchannuity_core.js"]
+      "@wasm": ["./wasm-pkg/xchannuity_core.js"],
+      "@cmojo": ["./cmojo-pkg/cmojo_core.js"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
