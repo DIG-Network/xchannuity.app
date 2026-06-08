@@ -4,6 +4,7 @@ import { useSage } from "../lib/walletconnect";
 import { address_to_puzzle_hash } from "../lib/wasm";
 import { CreatePanel } from "./CreatePanel";
 import { AnnuityCard } from "./AnnuityCard";
+import { RecoverCmojo } from "./RecoverCmojo";
 import { TakeOffer } from "./TakeOffer";
 import Diamond from "./Diamond";
 import { loadAnnuities, type StoredAnnuity } from "../lib/storage";
@@ -114,6 +115,7 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col gap-7">
+      <RecoverCmojo onChange={refresh} />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="font-serif text-[1.7rem] font-medium tracking-tight">Your annuities</h2>
