@@ -21,6 +21,7 @@ import { tokenByAssetId, CMOJO_ASSET_ID } from "../lib/tokens";
 import { meltToXch, cmojoOuterPh, devFeeMojos } from "../lib/cmojo";
 import { fromMojos, mojosToXch, toMojos, claimableMojos, nowUnix } from "../lib/format";
 import { removeAnnuity, type StoredAnnuity } from "../lib/storage";
+import { downloadBackup } from "../lib/backup";
 
 // Provably-unspendable burn target: the all-zeros puzzle hash. No puzzle reveal
 // can satisfy the stream layer's `tree_hash(owner) == 0x00…00` check, so a
@@ -584,8 +585,15 @@ export function AnnuityCard({
           </button>
         )}
         <button
-          onClick={() => { removeAnnuity(a.streamId); onChange(); }}
+          onClick={() => downloadBackup(a, nowUnix())}
+          title="Download a .xchannuity backup file"
           className="ml-auto text-xs text-[var(--fg-dim)] transition-colors hover:text-[var(--fg-muted)]"
+        >
+          Backup
+        </button>
+        <button
+          onClick={() => { removeAnnuity(a.streamId); onChange(); }}
+          className="text-xs text-[var(--fg-dim)] transition-colors hover:text-[var(--fg-muted)]"
         >
           Forget
         </button>

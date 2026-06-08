@@ -1,5 +1,6 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
 import { useSage } from "../lib/walletconnect";
 import { address_to_puzzle_hash } from "../lib/wasm";
 import { CreatePanel } from "./CreatePanel";
@@ -7,7 +8,8 @@ import { AnnuityCard } from "./AnnuityCard";
 import { RecoverCmojo } from "./RecoverCmojo";
 import { TakeOffer } from "./TakeOffer";
 import Diamond from "./Diamond";
-import { loadAnnuities, type StoredAnnuity } from "../lib/storage";
+import { loadAnnuities, saveAnnuity, type StoredAnnuity } from "../lib/storage";
+import { parseBackup } from "../lib/backup";
 import { discoverAnnuities, resolveLive } from "../lib/discovery";
 import { getPublicKeys, buildKeyResolver } from "../lib/sage";
 
@@ -21,6 +23,7 @@ export function Dashboard() {
   const [tab, setTab] = useState<Tab>("owned");
   const [creating, setCreating] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Detect the connected wallet's annuities ON CHAIN (hint walk), classified by
   // role: OWNED (wallet is the beneficiary/recipient) vs ISSUED (wallet controls
@@ -111,6 +114,26 @@ export function Dashboard() {
     refresh();
   }, [refresh]);
 
+  // Import a `.xchannuity` backup: validate, persist to the local cache, then
+  // re-scan so chain truth fills in the live coin/role. Recovers an annuity the
+  // browser cache lost, or one created in another wallet/app.
+  const onImportFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = ""; // allow re-selecting the same file later
+      if (!file) return;
+      try {
+        const imported = parseBackup(await file.text());
+        saveAnnuity(imported);
+        toast.success("Annuity imported");
+        refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't import that file");
+      }
+    },
+    [refresh],
+  );
+
   const list = tab === "owned" ? owned : issued;
 
   return (
@@ -154,6 +177,20 @@ export function Dashboard() {
               <path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5" />
             </svg>
             {scanning ? "Scanning…" : "Refresh"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xchannuity,application/json"
+            className="hidden"
+            onChange={onImportFile}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="btn btn-ghost btn-sm"
+            title="Import a .xchannuity backup file"
+          >
+            Import
           </button>
           <TakeOffer onTaken={refresh} />
           <button onClick={() => setCreating((v) => !v)} className="btn btn-primary btn-sm">
