@@ -21,7 +21,7 @@ import { tokenByAssetId, CMOJO_ASSET_ID } from "../lib/tokens";
 import { meltToXch, cmojoOuterPh, devFeeMojos } from "../lib/cmojo";
 import { fromMojos, mojosToXch, toMojos, claimableMojos, nowUnix } from "../lib/format";
 import { removeAnnuity, type StoredAnnuity } from "../lib/storage";
-import { downloadBackup } from "../lib/backup";
+import { downloadBackup, backupFilename } from "../lib/backup";
 
 // Provably-unspendable burn target: the all-zeros puzzle hash. No puzzle reveal
 // can satisfy the stream layer's `tree_hash(owner) == 0x00…00` check, so a
@@ -63,6 +63,7 @@ export function AnnuityCard({
   const [offerResult, setOfferResult] = useState<string | null>(null);
   const [burnOpen, setBurnOpen] = useState(false);
   const [burnConfirm, setBurnConfirm] = useState("");
+  const [backupOpen, setBackupOpen] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(nowUnix()), 1000);
@@ -585,7 +586,7 @@ export function AnnuityCard({
           </button>
         )}
         <button
-          onClick={() => downloadBackup(a, nowUnix())}
+          onClick={() => setBackupOpen(true)}
           title="Download a .xchannuity backup file"
           className="ml-auto text-xs text-[var(--fg-dim)] transition-colors hover:text-[var(--fg-muted)]"
         >
@@ -757,6 +758,57 @@ export function AnnuityCard({
               className="btn btn-warn btn-md flex-1"
             >
               Burn permanently
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={backupOpen} onClose={() => setBackupOpen(false)} title="Backup this annuity">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm leading-relaxed text-[var(--fg-muted)]">
+            Downloads a <span className="font-mono-num text-[var(--fg)]">.xchannuity</span> file — a small
+            JSON snapshot holding everything needed to find this annuity on chain again: its launcher coin
+            id, beneficiary hint, vesting window, and amounts.
+          </p>
+          <ul className="flex flex-col gap-2 text-sm text-[var(--fg-muted)]">
+            <li className="flex gap-2">
+              <span style={{ color: "var(--accent-bright)" }}>•</span>
+              <span>
+                Re-import it here (the <span className="text-[var(--fg)]">Import</span> button) if this annuity
+                ever goes missing from the list — your browser cache, not the chain, is what was lost.
+              </span>
+            </li>
+            <li className="flex gap-2">
+              <span style={{ color: "var(--accent-bright)" }}>•</span>
+              <span>Hand it to another wallet or application that understands the format.</span>
+            </li>
+            <li className="flex gap-2">
+              <span style={{ color: "var(--accent-bright)" }}>•</span>
+              <span>
+                It holds <span className="text-[var(--fg)]">no private keys</span> — only public, on-chain
+                lookup data. Spending still requires your wallet.
+              </span>
+            </li>
+          </ul>
+          <div
+            className="rounded-[var(--r-md)] p-3 text-xs"
+            style={{ border: "1px solid var(--border)", background: "rgba(0,0,0,0.2)" }}
+          >
+            <span className="text-[var(--fg-muted)]">File: </span>
+            <span className="font-mono-num break-all text-[var(--fg)]">{backupFilename(a)}</span>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setBackupOpen(false)} className="btn btn-ghost btn-md flex-1">
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                downloadBackup(a, nowUnix());
+                setBackupOpen(false);
+              }}
+              className="btn btn-primary btn-md flex-1"
+            >
+              Download backup
             </button>
           </div>
         </div>
