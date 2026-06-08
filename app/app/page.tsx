@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Toaster } from "react-hot-toast";
 import { WalletConnectProvider, useSage } from "./lib/walletconnect";
 import { ensureWasm } from "./lib/wasm";
+import { ensureCmojo } from "./lib/cmojo";
 import { Landing } from "./components/Landing";
 import { Dashboard } from "./components/Dashboard";
 import { ConnectButton } from "./components/ConnectButton";
@@ -117,7 +118,7 @@ export default function Page() {
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    ensureWasm()
+    Promise.all([ensureWasm(), ensureCmojo()])
       .then(() => setReady(true))
       .catch((e) => setErr(String((e as Error)?.message ?? e)));
   }, []);
