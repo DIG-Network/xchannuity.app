@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { useSage } from "../lib/walletconnect";
 import { useSpendConfirm, type SpendSummaryLine } from "./SpendConfirm";
@@ -28,6 +28,17 @@ export function TakeOffer({ onTaken }: { onTaken: () => void }) {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [inspected, setInspected] = useState<Inspected | null>(null);
+  const [drag, setDrag] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function readFile(file?: File | null) {
+    if (!file) return;
+    try {
+      parse((await file.text()).trim());
+    } catch {
+      setErr("Could not read that file");
+    }
+  }
 
   function parse(s: string) {
     setText(s);
@@ -130,9 +141,54 @@ export function TakeOffer({ onTaken }: { onTaken: () => void }) {
       <Modal isOpen={open} onClose={() => setOpen(false)} title="Take an annuity offer">
         <div className="flex flex-col gap-4">
           <p className="text-sm leading-relaxed text-[var(--fg-muted)]">
-            Paste a standard annuity offer (<span className="font-mono-num">offer1…</span>). You&apos;ll see exactly
-            what it trades before paying.
+            Provide a standard annuity offer (<span className="font-mono-num">offer1…</span>) — drop a file, browse, or
+            paste it. You&apos;ll see exactly what it trades before paying.
           </p>
+
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDrag(true);
+            }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDrag(false);
+              readFile(e.dataTransfer.files?.[0]);
+            }}
+            onClick={() => fileRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") fileRef.current?.click();
+            }}
+            className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-[var(--r-md)] border border-dashed px-4 py-8 text-center transition-colors"
+            style={{
+              borderColor: drag ? "var(--accent)" : "var(--border-strong)",
+              background: drag ? "var(--accent-soft)" : "transparent",
+            }}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--fg-muted)]">
+              Drop an offer file
+            </span>
+            <span className="text-xs text-[var(--fg-dim)]">
+              or <span className="text-[var(--fg-muted)] underline">browse</span> · .offer / .txt
+            </span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".offer,.txt,text/plain"
+              className="hidden"
+              onChange={(e) => readFile(e.target.files?.[0])}
+            />
+          </div>
+
+          <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-[var(--fg-dim)]">
+            <span className="h-px flex-1" style={{ background: "var(--border)" }} />
+            or paste
+            <span className="h-px flex-1" style={{ background: "var(--border)" }} />
+          </div>
+
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-[var(--fg-muted)]">Offer string</span>
             <textarea
@@ -146,9 +202,7 @@ export function TakeOffer({ onTaken }: { onTaken: () => void }) {
             />
           </label>
           {err && (
-            <p className="flex items-center gap-1.5 text-xs text-[var(--danger)]">
-              <span aria-hidden>⚠</span> {err}
-            </p>
+            <p className="text-xs text-[var(--danger)]">{err}</p>
           )}
 
           {inspected && (
@@ -171,8 +225,8 @@ export function TakeOffer({ onTaken }: { onTaken: () => void }) {
                 <span className="font-mono-num font-semibold">{mojosToXch(inspected.xch_amount)} XCH</span>
               </div>
               {inspected.clawback_ph && (
-                <p className="mt-3 flex items-start gap-1.5 border-t pt-2.5 text-xs" style={{ borderColor: "rgba(240,180,41,0.2)", color: "var(--warn)" }}>
-                  <span aria-hidden>⚠</span> Clawbackable — the issuer can still terminate this annuity.
+                <p className="mt-3 border-t pt-2.5 text-xs" style={{ borderColor: "rgba(216,166,74,0.25)", color: "var(--warn)" }}>
+                  Clawbackable — the issuer can still terminate this annuity.
                 </p>
               )}
             </div>

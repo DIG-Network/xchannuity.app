@@ -5,9 +5,24 @@ export interface Token {
   name: string;
   assetId: string; // 0x-prefixed
   decimals: number;
+  /** XCH virtual token: balance is native XCH; create wraps XCH→cMOJO and claim
+   *  melts cMOJO→XCH. `assetId` is the cMOJO bridge asset used under the hood. */
+  isXch?: boolean;
 }
 
+// cMOJO is the wrapped-XCH bridge asset — never shown to users; "XCH" stands in
+// for it (wrap on create, melt on claim).
+export const CMOJO_ASSET_ID =
+  "0x8808ca01803e09bf6d067075c9373b227aa8b086504ff0ac63cb3f02fe21c9ba";
+
 export const SUPPORTED_TOKENS: Token[] = [
+  {
+    symbol: "XCH",
+    name: "Chia",
+    assetId: CMOJO_ASSET_ID, // under the hood the annuity is a cMOJO CAT
+    decimals: 12,
+    isXch: true,
+  },
   {
     symbol: "wUSDC",
     name: "Ethereum warp.green USDC",
@@ -26,12 +41,9 @@ export const SUPPORTED_TOKENS: Token[] = [
     assetId: "0xae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac",
     decimals: 3,
   },
-  {
-    symbol: "cMOJO",
-    name: "cMojo (cxch.app)",
-    assetId: "0x8808ca01803e09bf6d067075c9373b227aa8b086504ff0ac63cb3f02fe21c9ba",
-    decimals: 3,
-  },
+  // cMOJO is intentionally NOT listed in the picker. It is used only under the
+  // hood as the wrapped-XCH bridge; the picker surfaces "XCH" instead once the
+  // wrap/melt feature lands. Never shown to users as "cMOJO".
 ];
 
 export function tokenByAssetId(assetId: string): Token | undefined {

@@ -1,38 +1,38 @@
 @import "tailwindcss";
 
 :root {
-  /* ===== Surfaces ===== */
-  --bg: #070b08;
-  --bg-2: #0a100c;
-  --panel: #0e140f;
-  --panel-2: #121a13;
-  --panel-raised: #15201780;
-  --border: #1c2a1e;
-  --border-strong: #29402c;
-  --hairline: rgba(255, 255, 255, 0.06);
+  /* ===== Surfaces (cool graphite, near-monochrome) ===== */
+  --bg: #0b0c0e;
+  --bg-2: #0f1013;
+  --panel: #131418;
+  --panel-2: #181a1f;
+  --panel-raised: #1c1f2580;
+  --border: #21232a;
+  --border-strong: #2e313a;
+  --hairline: rgba(255, 255, 255, 0.05);
 
-  /* ===== Accent (Chia green) ===== */
-  --accent: #4ade72;
-  --accent-bright: #6ee787;
-  --accent-deep: #2ea043;
-  --accent-ink: #04210a;
-  --accent-soft: rgba(74, 222, 128, 0.12);
-  --accent-soft-2: rgba(74, 222, 128, 0.22);
-  --accent-glow: rgba(74, 222, 128, 0.45);
+  /* ===== Accent (soft platinum / ice — used sparingly) ===== */
+  --accent: #cbd2de;
+  --accent-bright: #e8ebf1;
+  --accent-deep: #9aa2b1;
+  --accent-ink: #0b0c0e;
+  --accent-soft: rgba(203, 210, 222, 0.08);
+  --accent-soft-2: rgba(203, 210, 222, 0.16);
+  --accent-glow: rgba(203, 210, 222, 0.18);
 
-  /* ===== Semantic ===== */
-  --warn: #f0b429;
-  --warn-soft: rgba(240, 180, 41, 0.12);
-  --danger: #f87171;
+  /* ===== Semantic (muted) ===== */
+  --warn: #d8a64a;
+  --warn-soft: rgba(216, 166, 74, 0.10);
+  --danger: #d98b86;
 
-  /* ===== Text ===== */
-  --fg: #e8f1e6;
-  --fg-muted: #9aa79a;
-  --fg-dim: #6b786b;
+  /* ===== Text (cool off-white) ===== */
+  --fg: #e9ebf0;
+  --fg-muted: #9a9faa;
+  --fg-dim: #686d77;
 
-  /* ===== Type ===== */
-  --font-display: var(--font-clash), "Space Grotesk", system-ui, sans-serif;
-  --font-body: var(--font-body), system-ui, sans-serif;
+  /* ===== Type (Geist sans for display+body, Geist Mono for figures) ===== */
+  --font-display: var(--font-sans), system-ui, sans-serif;
+  --font-body: var(--font-sans), system-ui, sans-serif;
   --font-mono: var(--font-mono), ui-monospace, "SF Mono", monospace;
 
   /* ===== Spacing / radii / shadow ===== */
@@ -54,7 +54,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Atmospheric backdrop — subtle green aurora + grain, fixed behind content */
+/* Backdrop — a whisper of cool light from above + faint grain. Restrained. */
 body {
   position: relative;
   min-height: 100vh;
@@ -66,9 +66,8 @@ body::before {
   z-index: -2;
   pointer-events: none;
   background:
-    radial-gradient(60% 50% at 18% -5%, rgba(74, 222, 128, 0.10), transparent 60%),
-    radial-gradient(50% 45% at 92% 8%, rgba(46, 160, 67, 0.08), transparent 55%),
-    radial-gradient(70% 60% at 50% 110%, rgba(74, 222, 128, 0.06), transparent 60%);
+    radial-gradient(120% 80% at 50% -20%, rgba(203, 210, 222, 0.05), transparent 55%),
+    linear-gradient(180deg, #0d0e11, var(--bg) 40%);
 }
 body::after {
   content: "";
@@ -76,12 +75,14 @@ body::after {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  opacity: 0.025;
+  opacity: 0.02;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* ===== Reusable presentational primitives ===== */
 .font-display { font-family: var(--font-display); }
+/* High-contrast Garamond — luxury headlines only (large sizes). */
+.font-serif { font-family: var(--font-serif), Georgia, serif; }
 .font-mono-num { font-family: var(--font-mono); font-feature-settings: "tnum" 1, "zero" 1; }
 
 .panel {
@@ -124,16 +125,16 @@ body::after {
   white-space: nowrap;
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn:not(:disabled):active { transform: translateY(1px) scale(0.99); }
+/* Flat press feedback — no 3D translate/scale. */
+.btn:not(:disabled):active { opacity: 0.88; }
 
+/* Flat editorial fill: solid accent, no gloss gradient, inset highlight, or glow. */
 .btn-primary {
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent-deep));
+  background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 8px 24px -10px var(--accent-glow);
 }
 .btn-primary:not(:disabled):hover {
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 12px 30px -8px var(--accent-glow);
-  transform: translateY(-1px);
+  background: var(--accent-bright);
 }
 .btn-ghost {
   background: rgba(255, 255, 255, 0.02);
@@ -213,9 +214,99 @@ body::after {
 }
 .seg-item[data-active="true"] {
   color: var(--accent-ink);
-  background: linear-gradient(180deg, var(--accent-bright), var(--accent-deep));
+  background: var(--accent);
 }
 .seg-item:not([data-active="true"]):hover { color: var(--fg); }
+
+/* ===== Hero showpiece — jewel-like material (faceted edge + slow light sweep) ===== */
+.gem {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 36%),
+    radial-gradient(125% 80% at 50% -12%, rgba(203, 210, 222, 0.12), transparent 60%),
+    linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid rgba(203, 210, 222, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 40px 90px -42px rgba(0, 0, 0, 0.95),
+    0 2px 8px -2px rgba(0, 0, 0, 0.6);
+}
+/* faceted bright edge — a gem catching light along two corners */
+.gem::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 3;
+  background: conic-gradient(
+    from 130deg,
+    transparent 0deg,
+    rgba(232, 235, 241, 0.55) 55deg,
+    transparent 120deg,
+    transparent 305deg,
+    rgba(232, 235, 241, 0.4) 342deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.6;
+}
+/* slow light sweep across the face */
+.gem::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    105deg,
+    transparent 32%,
+    rgba(255, 255, 255, 0.09) 47%,
+    rgba(255, 255, 255, 0.02) 55%,
+    transparent 68%
+  );
+  transform: translateX(-120%);
+  animation: gemSweep 7.5s ease-in-out infinite;
+}
+.gem > * {
+  position: relative;
+  z-index: 2;
+}
+@keyframes gemSweep {
+  0% { transform: translateX(-120%); }
+  55%, 100% { transform: translateX(120%); }
+}
+
+/* ===== Diamond graphic — sheen sweep across a cut stone ===== */
+@keyframes diamondSheen {
+  0% { transform: translateX(-6px) skewX(-14deg); }
+  55%, 100% { transform: translateX(180px) skewX(-14deg); }
+}
+.diamond-sheen {
+  animation: diamondSheen 4.6s ease-in-out infinite;
+}
+@keyframes diamondGlint {
+  0%, 100% { opacity: 0; transform: scale(0.5); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.diamond-glint {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: diamondGlint 3.4s ease-in-out infinite;
+}
+@keyframes diamondFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.diamond-float {
+  animation: diamondFloat 5s ease-in-out infinite;
+}
 
 /* ===== Stream / vesting bar ===== */
 .stream-track {
@@ -228,33 +319,10 @@ body::after {
   background: rgba(0, 0, 0, 0.4);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
 }
-.stream-claimed { background: linear-gradient(90deg, var(--accent-deep), var(--accent)); }
-.stream-claimable {
-  position: relative;
-  background: linear-gradient(90deg, var(--accent), var(--accent-bright));
-  overflow: hidden;
-}
-.stream-claimable::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  background-size: 200% 100%;
-  animation: streamFlow 2.4s linear infinite;
-}
-.stream-tostream {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    rgba(255, 255, 255, 0.05) 0,
-    rgba(255, 255, 255, 0.05) 5px,
-    transparent 5px,
-    transparent 10px
-  );
-}
-@keyframes streamFlow {
-  0% { background-position: 200% 0; }
-  100% { background-position: -100% 0; }
-}
+/* Quiet, flat segments — claimed (muted), claimable (bright platinum), to-stream (faint). */
+.stream-claimed { background: var(--accent-deep); }
+.stream-claimable { background: var(--accent-bright); }
+.stream-tostream { background: rgba(255, 255, 255, 0.06); }
 
 /* ===== Entrance animations ===== */
 @keyframes riseIn {
@@ -297,14 +365,11 @@ body::after {
   transition: transform 0.22s cubic-bezier(0.22, 0.61, 0.36, 1), border-color 0.22s, box-shadow 0.22s;
 }
 .lift:hover {
-  transform: translateY(-3px);
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-pop);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise-in, .fade-in, .scale-in, .live-dot, .skeleton, .stream-claimable::after { animation: none !important; }
-  .lift:hover { transform: none; }
+  .rise-in, .fade-in, .scale-in, .live-dot, .skeleton, .gem::after, .diamond-sheen, .diamond-float, .diamond-glint { animation: none !important; }
 }
 
 /* ===== Powered-by-Chia chip (cursor-reactive glow) — ported from cXCH ===== */
@@ -323,23 +388,19 @@ body::after {
   gap: 10px;
   padding: 14px 28px;
   border-radius: 18px;
-  background: rgba(8, 22, 12, 0.5);
-  border: 1px solid rgba(94, 206, 113, 0.28);
+  background: rgba(19, 20, 24, 0.6);
+  border: 1px solid rgba(203, 210, 222, 0.2);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   text-decoration: none;
   transition: transform 0.25s cubic-bezier(0.22, 0.61, 0.36, 1),
     box-shadow 0.25s ease, border-color 0.25s ease;
 }
 .pbc-chip:hover {
-  transform: translateY(-3px) scale(1.04);
-  border-color: rgba(94, 206, 113, 0.7);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4), 0 0 28px rgba(94, 206, 113, 0.45);
-}
-.pbc-chip:active {
-  transform: translateY(-1px) scale(1.01);
+  border-color: rgba(203, 210, 222, 0.4);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45), 0 0 24px rgba(203, 210, 222, 0.12);
 }
 .pbc-glow {
   position: absolute;
@@ -352,8 +413,8 @@ body::after {
   background: radial-gradient(
     circle,
     #fff 0%,
-    #5ece71 30%,
-    rgba(94, 206, 113, 0.5) 52%,
+    #cbd2de 35%,
+    rgba(203, 210, 222, 0.4) 55%,
     transparent 74%
   );
   filter: blur(9px);
@@ -410,12 +471,12 @@ body::after {
   background: conic-gradient(
     from var(--pang, 0deg),
     #fff 0deg,
-    #5ece71 10deg,
-    rgba(94, 206, 113, 0.4) 26deg,
+    #cbd2de 10deg,
+    rgba(203, 210, 222, 0.4) 26deg,
     transparent 60deg,
     transparent 300deg,
-    rgba(94, 206, 113, 0.4) 334deg,
-    #5ece71 350deg,
+    rgba(203, 210, 222, 0.4) 334deg,
+    #cbd2de 350deg,
     #fff 360deg
   );
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -441,12 +502,13 @@ body::after {
 }
 .pbc-chia {
   height: 30px;
-  opacity: 1;
-  filter: brightness(0) invert(1) drop-shadow(0 0 10px rgba(94, 206, 113, 0.55));
+  opacity: 0.92;
+  filter: brightness(0) invert(1);
   transition: 0.25s ease;
 }
 .pbc-chip:hover .pbc-chia {
-  filter: brightness(0) invert(1) drop-shadow(0 0 12px rgba(94, 206, 113, 0.8));
+  opacity: 1;
+  filter: brightness(0) invert(1) drop-shadow(0 0 10px rgba(203, 210, 222, 0.35));
 }
 @media (prefers-reduced-motion: reduce) {
   .pbc-sheen {

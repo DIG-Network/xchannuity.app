@@ -106,7 +106,7 @@ export default function Modal({ isOpen, onClose, children, title }: ModalProps) 
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between border-b pb-4" style={{ borderColor: "var(--border)" }}>
-          <h3 id={titleId} className="font-display text-lg font-bold tracking-tight">
+          <h3 id={titleId} className="font-serif text-2xl font-medium tracking-tight">
             {title}
           </h3>
           <button
