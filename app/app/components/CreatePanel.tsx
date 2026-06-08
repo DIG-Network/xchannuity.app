@@ -7,6 +7,7 @@ import { build_create_annuity, address_to_puzzle_hash, standard_puzzle_hash } fr
 import {
   getPublicKeys,
   getAssetCoins,
+  getAddress,
   sumCoinAmounts,
   normalizeCoin,
   normalizeLineageProof,
@@ -14,7 +15,8 @@ import {
   buildKeyResolver,
   extractCoinName,
 } from "../lib/sage";
-import { SUPPORTED_TOKENS } from "../lib/tokens";
+import { SUPPORTED_TOKENS, CMOJO_ASSET_ID } from "../lib/tokens";
+import { wrapXch, devFeeMojos, cmojoStdPh } from "../lib/cmojo";
 import { fromMojos, toMojos, mojosToXch, nowUnix, with0x } from "../lib/format";
 import { saveAnnuity } from "../lib/storage";
 
@@ -111,12 +113,153 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
     return { fee, net, perDay };
   }, [amount, termSeconds, feeBps]);
 
+  // XCH path: wrap native XCH→cMOJO and fund the annuity in ONE atomic,
+  // Sage-signed bundle. The cMOJO mint amount IS the annuity principal (mojos),
+  // and the minted cMOJO coin (owned by the wallet) is the funding coin.
+  async function createXch() {
+    setBusy(true);
+    const startTime = nowUnix();
+    const endTime = startTime + termSeconds;
+    const principal = Number(toMojos(amount, 12)); // XCH mojos == cMOJO mint amount
+    if (!(principal > 0)) {
+      toast.error("Enter an XCH amount greater than 0");
+      setBusy(false);
+      return;
+    }
+    const feeMojos = Math.floor((principal * feeBps) / 10_000);
+    const wrapFee = devFeeMojos(BigInt(principal)); // cMOJO dev fee, 0.1%
+    let recipientHolder = "";
+    let clawbackHolder: string | null = null;
+    let streamIdHolder = "";
+
+    try {
+      await runSpend({
+        title: `Create ${amount} XCH annuity`,
+        confirmLabel: "Create annuity",
+        prepare: async (report) => {
+          report("Resolving wallet keys & address…");
+          const keys = await getPublicKeys(request);
+          const resolver = buildKeyResolver(keys);
+          const walletPh = address_to_puzzle_hash(await getAddress(request));
+          const walletKey = resolver(walletPh);
+          if (!walletKey) throw new Error("Could not match a wallet key to your address");
+
+          // The connected wallet is the ISSUER; clawback authority is the issuer.
+          const recipient = beneficiary === "self" ? walletPh : address_to_puzzle_hash(address.trim());
+          recipientHolder = recipient;
+          clawbackHolder = permanent ? null : walletPh;
+
+          report("Fetching XCH coins…");
+          const raw = await getAssetCoins(request, null, null);
+          if (raw.length === 0) throw new Error("No XCH coins in this wallet");
+
+          report("Selecting XCH…");
+          // Need to cover the principal (minted) + the cMOJO wrap fee.
+          const need = BigInt(principal) + wrapFee;
+          const withKey = raw
+            .map((r) => {
+              const coin = normalizeCoin(r);
+              return { raw: r, coin, key: resolver(coin.puzzle_hash) };
+            })
+            .filter((n) => n.key)
+            // largest first → fewest inputs to cover the need
+            .sort((a, b) => (BigInt(b.coin.amount) > BigInt(a.coin.amount) ? 1 : -1));
+          if (withKey.length === 0) throw new Error("Could not match a wallet key to your XCH coins");
+
+          const available = withKey.reduce((a, n) => a + BigInt(n.coin.amount), 0n);
+          if (available < need) {
+            throw new Error(`Insufficient XCH for ${amount} (have ${mojosToXch(available)})`);
+          }
+
+          const selected: typeof withKey = [];
+          let total = 0n;
+          for (const n of withKey) {
+            if (total >= need) break;
+            selected.push(n);
+            total += BigInt(n.coin.amount);
+          }
+          const xchCoins = selected.map((n) => ({ coin: n.coin, synthetic_key: n.key! }));
+
+          report("Wrapping XCH→cMOJO…");
+          const wrap = await wrapXch({
+            xchCoins,
+            recipientPh: walletPh,
+            changePh: walletPh,
+            mintMojos: BigInt(principal),
+            feeMojos: 0n,
+          });
+          const minted = wrap.minted_coins[0];
+          if (!minted) throw new Error("Wrap did not return a minted cMOJO coin");
+
+          report("Building annuity spend…");
+          // The minted cMOJO coin is owned by walletPh, so its inner p2 key is the
+          // wallet key. coin.puzzle_hash is the OUTER cMOJO CAT ph; p2_puzzle_hash
+          // is the INNER standard ph for that key (cmojoStdPh == standard p2).
+          const created: any = build_create_annuity({
+            asset_id: CMOJO_ASSET_ID,
+            funding: [
+              {
+                coin: minted.coin,
+                lineage_proof: minted.lineage_proof,
+                p2_puzzle_hash: cmojoStdPh(walletKey),
+                synthetic_key: walletKey,
+              },
+            ],
+            recipient,
+            clawback_ph: clawbackHolder,
+            end_time: endTime,
+            start_time: startTime,
+            principal,
+            network_fee_mojos: 0,
+          });
+          streamIdHolder = created.stream_id;
+
+          // Atomic bundle: wrap spends + annuity-create spends. signAndBroadcast
+          // aggregates the wallet sig with the cMOJO issuer partial sig.
+          const coin_spends = [...wrap.coin_spends, ...created.coin_spends];
+
+          const summary: SpendSummaryLine[] = [
+            { label: "Token", value: "XCH" },
+            { label: "Amount", value: `${amount} XCH` },
+            { label: "Protocol fee", value: `${mojosToXch(feeMojos)} XCH` },
+            { label: "Wrap fee", value: `${mojosToXch(wrapFee)} XCH` },
+            { label: "Streamed", value: `${mojosToXch(principal - feeMojos)} XCH`, strong: true },
+            { label: "Term", value: termLabel },
+            { label: "Beneficiary", value: beneficiary === "self" ? "Myself" : address.trim() },
+          ];
+
+          return {
+            built: { coin_spends, issuer_partial_sig_hex: wrap.issuer_partial_signature },
+            summary,
+            watchCoinId: extractCoinName(selected[0].raw),
+          };
+        },
+      });
+
+      saveAnnuity({
+        streamId: streamIdHolder,
+        assetId: CMOJO_ASSET_ID,
+        recipient: recipientHolder,
+        clawbackPh: clawbackHolder,
+        startTime,
+        endTime,
+        lastPaymentTime: startTime,
+        principalMojos: principal - feeMojos,
+        totalMojos: principal - feeMojos,
+        createdAt: startTime,
+      });
+      toast.success("XCH annuity created");
+      onDone();
+    } catch {
+      // SpendConfirm already surfaced the error
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function create() {
-    // XCH create wraps XCH→cMOJO at spend time via cmojo-core. That spend path
-    // is being wired up; until then, guard so it doesn't fall through to the
-    // (wrong) cMOJO-CAT-coin path and fail confusingly.
     if (isXch) {
-      toast.error("XCH annuities are being wired up (XCH→cMOJO wrap). Coming shortly.");
+      await createXch();
       return;
     }
     setBusy(true);
