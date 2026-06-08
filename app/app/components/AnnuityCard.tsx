@@ -11,11 +11,13 @@ import {
   encode_offer,
   coin_id,
   address_to_puzzle_hash,
+  annuity_inner_puzzle_hash,
 } from "../lib/wasm";
 import Modal from "./Modal";
-import { resolveLive } from "../lib/discovery";
-import { getPublicKeys, getAssetCoins, normalizeCoin, buildKeyResolver, getAddress } from "../lib/sage";
-import { tokenByAssetId } from "../lib/tokens";
+import { resolveLive, type RichAnnuity } from "../lib/discovery";
+import { getPublicKeys, getAssetCoins, normalizeCoin, buildKeyResolver, getAddress, extractCoinName } from "../lib/sage";
+import { tokenByAssetId, CMOJO_ASSET_ID } from "../lib/tokens";
+import { meltToXch, cmojoOuterPh, devFeeMojos } from "../lib/cmojo";
 import { fromMojos, mojosToXch, toMojos, claimableMojos, nowUnix } from "../lib/format";
 import { removeAnnuity, type StoredAnnuity } from "../lib/storage";
 
@@ -68,6 +70,9 @@ export function AnnuityCard({
   const token = tokenByAssetId(a.assetId);
   const decimals = token?.decimals ?? 3;
   const isCmojo = token?.symbol === "cMOJO";
+  // XCH annuities are cMOJO CATs under the hood: after CLAIM pays vested cMOJO,
+  // we auto-melt that cMOJO → native XCH via a second signed spend.
+  const isXch = a.assetId.toLowerCase() === CMOJO_ASSET_ID.toLowerCase();
   const fmt = (m: number) => (isCmojo ? `${mojosToXch(m)} XCH` : `${fromMojos(m, decimals)} ${token?.symbol ?? "CAT"}`);
 
   // streaming-ui breakdown: claimed | claimable | to-stream, of the original total.
@@ -108,6 +113,10 @@ export function AnnuityCard({
   });
 
   function doClaim() {
+    // Captured from the claim's prepare() so the follow-on melt can reconstruct
+    // the just-claimed cMOJO payout coin (XCH annuities only).
+    let claimedLive: RichAnnuity | null = null;
+    let claimedMojos = 0;
     runSpend({
       title: `Claim ${token?.symbol ?? "CAT"} annuity`,
       confirmLabel: "Claim",
@@ -128,6 +137,10 @@ export function AnnuityCard({
           owner_synthetic_key: ownerKey,
           time: t,
         });
+        // The claim pays `claimable` cMOJO to a.recipient. Capture the live coin
+        // + amount for the auto-melt (XCH annuities).
+        claimedLive = live;
+        claimedMojos = claimable;
         const watch = coin_id(live.coin.parent_coin_info, live.coin.puzzle_hash, BigInt(live.coin.amount));
         const summary: SpendSummaryLine[] = [
           { label: "Claiming", value: fmt(claimable), strong: true },
@@ -136,11 +149,98 @@ export function AnnuityCard({
         return { built, summary, watchCoinId: watch };
       },
     })
-      .then(() => {
+      .then(async () => {
         toast.success("Claim confirmed");
+        // XCH annuity: the claim paid vested cMOJO to the owner. Immediately
+        // prompt a second signed spend that melts it → native XCH.
+        if (isXch && claimedLive && claimedMojos > 0) {
+          try {
+            await meltClaimed(claimedLive, claimedMojos);
+          } catch {
+            // User cancelled or melt failed — claim already landed; the cMOJO is
+            // claimable manually later. Don't fail the claim.
+          }
+        }
         onChange();
       })
       .catch(() => {});
+  }
+
+  // Second leg of an XCH claim: melt the just-claimed cMOJO payout → native XCH.
+  // `live` is the annuity coin the claim spent; `claimableMojos` is the cMOJO
+  // amount the claim paid to `a.recipient`.
+  async function meltClaimed(live: RichAnnuity, claimedMojos: number) {
+    return runSpend({
+      title: "Withdraw to XCH",
+      confirmLabel: "Melt to XCH",
+      prepare: async (report) => {
+        report("Reconstructing claimed cMOJO coin…");
+        // The claim spent `live.coin`; its id is the parent of the payout coin.
+        const annuityCoinId = coin_id(
+          live.coin.parent_coin_info,
+          live.coin.puzzle_hash,
+          BigInt(live.coin.amount),
+        );
+        // The claim payout is CAT<cMOJO> with inner p2 hash = a.recipient.
+        const claimedCoin = {
+          parent_coin_info: annuityCoinId,
+          puzzle_hash: cmojoOuterPh(a.recipient),
+          amount: claimedMojos,
+        };
+        // CAT lineage proof relative to the parent (the spent annuity coin):
+        //   parent_inner_puzzle_hash = the annuity's OWN StreamLayer inner ph,
+        //   computed from the same params the claim spent.
+        const parentInnerPh = annuity_inner_puzzle_hash(
+          a.recipient,
+          a.clawbackPh ?? undefined,
+          BigInt(a.endTime),
+          BigInt(a.lastPaymentTime),
+        );
+        const lineage_proof = {
+          parent_parent_coin_info: live.coin.parent_coin_info,
+          parent_inner_puzzle_hash: parentInnerPh,
+          parent_amount: live.coin.amount,
+        };
+
+        report("Resolving authorization…");
+        const keys = await getPublicKeys(request);
+        const resolver = buildKeyResolver(keys);
+        const ownerKey = await resolveOwnerKey(a.recipient);
+
+        report("Selecting an XCH anchor coin…");
+        const xch = await getAssetCoins(request, null, null);
+        if (xch.length === 0) {
+          throw new Error("Keep a small XCH coin in your wallet to withdraw to XCH");
+        }
+        const anchorRaw = xch[0];
+        const anchorCoin = normalizeCoin(anchorRaw);
+        const anchorKey = resolver(anchorCoin.puzzle_hash);
+        if (!anchorKey) throw new Error("This wallet doesn't control its own XCH anchor coin");
+
+        report("Building melt bundle…");
+        const melt = await meltToXch({
+          cmojoCoins: [{ coin: claimedCoin, lineage_proof, synthetic_key: ownerKey }],
+          anchorCoins: [{ coin: anchorCoin, synthetic_key: anchorKey }],
+          recipientPh: a.recipient, // native XCH goes to the annuity owner
+          catChangePh: a.recipient,
+          meltMojos: BigInt(claimedMojos),
+          feeMojos: 0n,
+        });
+
+        const summary: SpendSummaryLine[] = [
+          { label: "Withdraw", value: `${mojosToXch(claimedMojos)} XCH`, strong: true },
+          { label: "Melt fee", value: `${mojosToXch(Number(devFeeMojos(BigInt(claimedMojos))))} XCH` },
+        ];
+        return {
+          built: {
+            coin_spends: melt.coin_spends,
+            issuer_partial_sig_hex: melt.issuer_partial_signature,
+          },
+          summary,
+          watchCoinId: extractCoinName(anchorRaw),
+        };
+      },
+    });
   }
 
   function doTransfer(dest: string) {
