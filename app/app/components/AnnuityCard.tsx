@@ -15,6 +15,7 @@ import {
 } from "../lib/wasm";
 import Modal from "./Modal";
 import { resolveLive, type RichAnnuity } from "../lib/discovery";
+import { getCoinRecordsByPuzzleHash } from "../lib/coinset";
 import { getPublicKeys, getAssetCoins, normalizeCoin, buildKeyResolver, getAddress, extractCoinName } from "../lib/sage";
 import { tokenByAssetId, CMOJO_ASSET_ID } from "../lib/tokens";
 import { meltToXch, cmojoOuterPh, devFeeMojos } from "../lib/cmojo";
@@ -160,7 +161,7 @@ export function AnnuityCard({
         // prompt a second signed spend that melts it → native XCH.
         if (isXch && claimedLive && claimedMojos > 0) {
           try {
-            await meltClaimed(claimedLive, claimedMojos);
+            await meltClaimed(claimedLive);
           } catch {
             // User cancelled or melt failed — claim already landed; the cMOJO is
             // claimable manually later. Don't fail the claim.
@@ -174,27 +175,42 @@ export function AnnuityCard({
   // Second leg of an XCH claim: melt the just-claimed cMOJO payout → native XCH.
   // `live` is the annuity coin the claim spent; `claimableMojos` is the cMOJO
   // amount the claim paid to `a.recipient`.
-  async function meltClaimed(live: RichAnnuity, claimedMojos: number) {
+  async function meltClaimed(live: RichAnnuity) {
     return runSpend({
       title: "Withdraw to XCH",
       confirmLabel: "Melt to XCH",
       prepare: async (report) => {
-        report("Reconstructing claimed cMOJO coin…");
-        // The claim spent `live.coin`; its id is the parent of the payout coin.
+        report("Locating the claimed cMOJO coin on-chain…");
+        // The claim spent `live.coin`; the payout coin's parent IS its id.
         const annuityCoinId = coin_id(
           live.coin.parent_coin_info,
           live.coin.puzzle_hash,
           BigInt(live.coin.amount),
         );
-        // The claim payout is CAT<cMOJO> with inner p2 hash = a.recipient.
-        const claimedCoin = {
-          parent_coin_info: annuityCoinId,
-          puzzle_hash: cmojoOuterPh(a.recipient),
-          amount: claimedMojos,
-        };
+        // DISCOVER the real payout coin from the node rather than reconstructing
+        // its id by hand: the claim paid a CAT<cMOJO> coin (inner p2 = a.recipient,
+        // outer ph = cmojoOuterPh(recipient)) whose parent is the spent annuity
+        // coin. The node is the source of truth for the exact amount — eliminates
+        // the amount/time reconstruction that previously caused UNKNOWN_UNSPENT.
+        // The claim just confirmed; poll briefly to absorb node-indexing lag.
+        const outerPh = cmojoOuterPh(a.recipient);
+        const eq = (x: string, y: string) =>
+          x.toLowerCase().replace(/^0x/, "") === y.toLowerCase().replace(/^0x/, "");
+        let claimedCoin: { parent_coin_info: string; puzzle_hash: string; amount: number } | undefined;
+        for (let attempt = 0; attempt < 5 && !claimedCoin; attempt++) {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+          const recs = await getCoinRecordsByPuzzleHash(outerPh, false);
+          claimedCoin = (recs.coin_records ?? [])
+            .filter((r) => !r.spent && eq(r.coin.parent_coin_info, annuityCoinId))
+            .map((r) => r.coin)[0];
+        }
+        if (!claimedCoin) {
+          throw new Error("Claimed XCH not located on-chain yet — wait a few seconds and withdraw again.");
+        }
         // CAT lineage proof relative to the parent (the spent annuity coin):
         //   parent_inner_puzzle_hash = the annuity's OWN StreamLayer inner ph,
-        //   computed from the same params the claim spent.
+        //   computed from the same params the claim spent. (The node returns the
+        //   coin, not its lineage, so this is still derived locally.)
         const parentInnerPh = annuity_inner_puzzle_hash(
           a.recipient,
           a.clawbackPh ?? undefined,
@@ -228,13 +244,13 @@ export function AnnuityCard({
           anchorCoins: [{ coin: anchorCoin, synthetic_key: anchorKey }],
           recipientPh: a.recipient, // native XCH goes to the annuity owner
           catChangePh: a.recipient,
-          meltMojos: BigInt(claimedMojos),
+          meltMojos: BigInt(claimedCoin.amount),
           feeMojos: 0n,
         });
 
         const summary: SpendSummaryLine[] = [
-          { label: "Withdraw", value: `${mojosToXch(claimedMojos)} XCH`, strong: true },
-          { label: "Melt fee", value: `${mojosToXch(Number(devFeeMojos(BigInt(claimedMojos))))} XCH` },
+          { label: "Withdraw", value: `${mojosToXch(claimedCoin.amount)} XCH`, strong: true },
+          { label: "Melt fee", value: `${mojosToXch(Number(devFeeMojos(BigInt(claimedCoin.amount))))} XCH` },
         ];
         return {
           built: {
