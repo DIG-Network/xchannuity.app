@@ -16,8 +16,28 @@ import Modal from "./Modal";
 import { resolveLive } from "../lib/discovery";
 import { getPublicKeys, getAssetCoins, normalizeCoin, buildKeyResolver, getAddress } from "../lib/sage";
 import { tokenByAssetId } from "../lib/tokens";
-import { fromMojos, mojosToXch, toMojos, claimableMojos, humanCountdown, nowUnix } from "../lib/format";
+import { fromMojos, mojosToXch, toMojos, claimableMojos, nowUnix } from "../lib/format";
 import { removeAnnuity, type StoredAnnuity } from "../lib/storage";
+
+// Provably-unspendable burn target: the all-zeros puzzle hash. No puzzle reveal
+// can satisfy the stream layer's `tree_hash(owner) == 0x00…00` check, so a
+// transfer here yields a permanently unspendable STREAM<0x00…00> coin — the
+// annuity is destroyed (value unrecoverable). Burn reuses the audited TRANSFER
+// path; no on-chain change.
+const BURN_PH = "0x" + "00".repeat(32);
+
+// A statement line: muted label left, right-aligned tabular figure, hairline rule.
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="flex items-baseline justify-between gap-4 border-t py-2.5 first:border-t-0"
+      style={{ borderColor: "var(--border)" }}
+    >
+      <dt className="text-[var(--fg-muted)]">{label}</dt>
+      <dd className="font-mono-num tabular-nums text-[var(--fg)]">{value}</dd>
+    </div>
+  );
+}
 
 export function AnnuityCard({
   a,
@@ -37,6 +57,8 @@ export function AnnuityCard({
   const [sellPrice, setSellPrice] = useState("");
   const [sellBusy, setSellBusy] = useState(false);
   const [offerResult, setOfferResult] = useState<string | null>(null);
+  const [burnOpen, setBurnOpen] = useState(false);
+  const [burnConfirm, setBurnConfirm] = useState("");
 
   useEffect(() => {
     const id = setInterval(() => setNow(nowUnix()), 1000);
@@ -163,6 +185,44 @@ export function AnnuityCard({
       .catch(() => {});
   }
 
+  // BURN — destroy the annuity by transferring it to the unspendable all-zeros
+  // address. Reuses the audited TRANSFER path; the continuation STREAM<0x00…00>
+  // can never be spent again. Value is permanently unrecoverable.
+  function doBurn() {
+    runSpend({
+      title: `Burn ${token?.symbol ?? "CAT"} annuity`,
+      confirmLabel: "Burn permanently",
+      prepare: async (report) => {
+        report("Locating the annuity coin…");
+        const live = await resolveLive(a);
+        report("Resolving authorization…");
+        const ownerKey = await resolveOwnerKey(a.recipient);
+        report("Building burn spend…");
+        const built: any = build_transfer({
+          params: params(),
+          annuity_coin: live.coin,
+          lineage_proof: live.lineage_proof,
+          asset_id: a.assetId,
+          owner_synthetic_key: ownerKey,
+          new_recipient: BURN_PH,
+        });
+        const watch = coin_id(live.coin.parent_coin_info, live.coin.puzzle_hash, BigInt(live.coin.amount));
+        const summary: SpendSummaryLine[] = [
+          { label: "Burning", value: `${token?.symbol ?? "CAT"} annuity`, strong: true },
+          { label: "Destroyed (unrecoverable)", value: fmt(a.principalMojos) },
+          { label: "Sent to", value: "0x00…00 · unspendable" },
+        ];
+        return { built, summary, watchCoinId: watch };
+      },
+    })
+      .then(() => {
+        toast.success("Annuity burned");
+        removeAnnuity(a.streamId);
+        onChange();
+      })
+      .catch(() => {});
+  }
+
   function doClawback() {
     if (!a.clawbackPh) return;
     const clawbackPh = a.clawbackPh;
@@ -282,68 +342,68 @@ export function AnnuityCard({
   const pct = total > 0 ? Math.round(((claimed + claimable) / total) * 100) : 0;
 
   return (
-    <div className="panel lift relative overflow-hidden p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold"
-            style={{ background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent-soft-2)" }}
-            aria-hidden
-          >
-            {(token?.symbol ?? "CAT").slice(0, 3).toUpperCase()}
-          </span>
-          <div className="font-display text-sm font-semibold">{token?.symbol ?? "CAT"} annuity</div>
-        </div>
-        <span className={a.clawbackPh ? "badge badge-warn" : "badge badge-accent"}>
-          <span aria-hidden>{a.clawbackPh ? "↩" : "🔒"}</span>
-          {a.clawbackPh ? "clawbackable" : "permanent"}
-        </span>
-      </div>
-
-      <div className="font-mono-num text-[2rem] font-bold leading-none tabular-nums" style={{ color: "var(--accent-bright)" }}>
-        {fmt(claimable)}
-      </div>
-      <div className="mb-4 mt-1.5 flex items-center gap-1.5 text-xs text-[var(--fg-muted)]">
-        <span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-        claimable now
-        <span className="text-[var(--fg-dim)]">·</span>
-        {humanCountdown(a.endTime, now)}
-      </div>
-
-      <div className="mb-1 flex items-center justify-between text-[10px] font-medium text-[var(--fg-dim)]">
-        <span>vesting progress</span>
-        <span className="font-mono-num text-[var(--fg-muted)]">{pct}%</span>
-      </div>
-      <div className="stream-track mb-3" role="img" aria-label={`${pct}% vested`}>
-        <div className="stream-claimed h-full" style={{ width: `${pctOf(claimed)}%` }} title="claimed" />
-        <div className="stream-claimable h-full" style={{ width: `${pctOf(claimable)}%` }} title="claimable" />
-        <div className="stream-tostream h-full" style={{ width: `${pctOf(toStream)}%` }} title="to stream" />
-      </div>
-      <div className="mb-5 grid grid-cols-3 gap-2 text-[10px]">
+    <div className="panel relative overflow-hidden">
+      {/* Statement header — instrument, reference, standing */}
+      <div
+        className="flex items-baseline justify-between gap-3 border-b px-6 pb-4 pt-5"
+        style={{ borderColor: "var(--border)" }}
+      >
         <div>
-          <span className="flex items-center gap-1 text-[var(--fg-muted)]">
-            <span className="h-2 w-2 rounded-sm" style={{ background: "var(--accent-deep)" }} /> Claimed
-          </span>
-          <div className="font-mono-num mt-0.5 truncate text-[var(--fg)]">{fmt(claimed)}</div>
+          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--fg-muted)]">
+            {token?.symbol ?? "CAT"} Annuity
+          </div>
+          <div className="font-mono-num mt-1 text-[11px] text-[var(--fg-dim)]">
+            REF {a.streamId.slice(2, 10).toUpperCase()}
+          </div>
         </div>
-        <div className="text-center">
-          <span className="flex items-center justify-center gap-1 text-[var(--fg-muted)]">
-            <span className="h-2 w-2 rounded-sm" style={{ background: "var(--accent-bright)" }} /> Claimable
-          </span>
-          <div className="font-mono-num mt-0.5 truncate text-[var(--fg)]">{fmt(claimable)}</div>
-        </div>
-        <div className="text-right">
-          <span className="flex items-center justify-end gap-1 text-[var(--fg-muted)]">
-            <span className="h-2 w-2 rounded-sm" style={{ background: "rgba(255,255,255,0.25)" }} /> To stream
-          </span>
-          <div className="font-mono-num mt-0.5 truncate text-[var(--fg)]">{fmt(toStream)}</div>
+        <div
+          className="text-[11px] font-medium uppercase tracking-[0.14em]"
+          style={{ color: a.clawbackPh ? "var(--warn)" : "var(--fg-muted)" }}
+        >
+          {a.clawbackPh ? "Clawbackable" : "Permanent"}
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t pt-4" style={{ borderColor: "var(--border)" }}>
+      <div className="px-6 py-5">
+        {/* Primary figure */}
+        <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--fg-muted)]">
+          Claimable now
+        </div>
+        <div className="font-mono-num mt-2 text-[2.4rem] font-semibold leading-none tabular-nums text-[var(--fg)]">
+          {fmt(claimable)}
+        </div>
+
+        {/* Vested meter */}
+        <div className="mb-1.5 mt-5 flex items-baseline justify-between">
+          <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--fg-dim)]">Vested</span>
+          <span className="font-mono-num text-xs text-[var(--fg-muted)]">{pct}%</span>
+        </div>
+        <div className="stream-track" role="img" aria-label={`${pct}% vested`}>
+          <div className="stream-claimed h-full" style={{ width: `${pctOf(claimed)}%` }} />
+          <div className="stream-claimable h-full" style={{ width: `${pctOf(claimable)}%` }} />
+          <div className="stream-tostream h-full" style={{ width: `${pctOf(toStream)}%` }} />
+        </div>
+
+        {/* Statement rows */}
+        <dl className="mt-6 text-sm">
+          <Row label="Principal" value={fmt(total)} />
+          <Row label="Claimed to date" value={fmt(claimed)} />
+          <Row label="Remaining" value={fmt(remaining)} />
+          <Row
+            label="Term ends"
+            value={new Date(a.endTime * 1000).toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })}
+          />
+        </dl>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t px-6 py-4" style={{ borderColor: "var(--border)" }}>
         {role === "owner" && (
           <button onClick={doClaim} className="btn btn-primary btn-sm">
-            <span aria-hidden>↓</span> Claim
+            Claim
           </button>
         )}
         {/* Transfer + Sell only for permanent (non-clawbackable) annuities the
@@ -369,11 +429,20 @@ export function AnnuityCard({
             >
               Offer
             </button>
+            <button
+              onClick={() => {
+                setBurnConfirm("");
+                setBurnOpen(true);
+              }}
+              className="text-xs font-medium text-[var(--fg-dim)] transition-colors hover:text-[var(--danger)]"
+            >
+              Burn
+            </button>
           </>
         )}
         {role === "issuer" && a.clawbackPh && (
           <button onClick={doClawback} className="btn btn-warn btn-sm">
-            <span aria-hidden>↩</span> Clawback
+            Clawback
           </button>
         )}
         <button
@@ -504,6 +573,47 @@ export function AnnuityCard({
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={burnOpen} onClose={() => setBurnOpen(false)} title="Burn annuity">
+        <div className="flex flex-col gap-4">
+          <div
+            className="rounded-[var(--r-md)] border p-4 text-sm leading-relaxed"
+            style={{ borderColor: "rgba(217,139,134,0.3)", color: "var(--fg-muted)" }}
+          >
+            Burning sends the entire remaining annuity
+            (<span className="font-semibold text-[var(--fg)]">{fmt(remaining)}</span>) to an unspendable address. It is
+            destroyed permanently and <span className="text-[var(--danger)]">cannot be recovered</span> — there is no
+            undo.
+          </div>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-[var(--fg-muted)]">
+              Type <span className="font-mono-num text-[var(--fg)]">BURN</span> to confirm
+            </span>
+            <input
+              value={burnConfirm}
+              onChange={(e) => setBurnConfirm(e.target.value)}
+              placeholder="BURN"
+              autoFocus
+              className="field field-mono"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button onClick={() => setBurnOpen(false)} className="btn btn-ghost btn-md flex-1">
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setBurnOpen(false);
+                doBurn();
+              }}
+              disabled={burnConfirm.trim().toUpperCase() !== "BURN"}
+              className="btn btn-warn btn-md flex-1"
+            >
+              Burn permanently
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

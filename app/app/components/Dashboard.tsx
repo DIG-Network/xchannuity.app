@@ -5,6 +5,7 @@ import { address_to_puzzle_hash } from "../lib/wasm";
 import { CreatePanel } from "./CreatePanel";
 import { AnnuityCard } from "./AnnuityCard";
 import { TakeOffer } from "./TakeOffer";
+import Diamond from "./Diamond";
 import { loadAnnuities, type StoredAnnuity } from "../lib/storage";
 import { discoverAnnuities, resolveLive } from "../lib/discovery";
 import { getPublicKeys, buildKeyResolver } from "../lib/sage";
@@ -115,7 +116,7 @@ export function Dashboard() {
     <div className="flex flex-col gap-7">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="font-display text-2xl font-bold tracking-tight">Your annuities</h2>
+          <h2 className="font-serif text-[1.7rem] font-medium tracking-tight">Your annuities</h2>
           <p className="mt-1 flex items-center gap-2 text-xs text-[var(--fg-muted)]">
             {scanning ? (
               <>
@@ -138,9 +139,18 @@ export function Dashboard() {
             className="btn btn-ghost btn-sm"
             aria-label="Refresh annuities"
           >
-            <span className={scanning ? "inline-block animate-spin" : "inline-block"} aria-hidden>
-              ↻
-            </span>
+            <svg
+              className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5" />
+            </svg>
             {scanning ? "Scanning…" : "Refresh"}
           </button>
           <TakeOffer onTaken={refresh} />
@@ -200,13 +210,7 @@ export function Dashboard() {
         </div>
       ) : list.length === 0 ? (
         <div className="panel flex flex-col items-center gap-3 p-12 text-center">
-          <span
-            className="inline-flex h-14 w-14 items-center justify-center rounded-2xl text-2xl"
-            style={{ background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent-soft-2)" }}
-            aria-hidden
-          >
-            {tab === "owned" ? "🌱" : "↩"}
-          </span>
+          <Diamond className="mb-1 h-28 w-28" />
           <p className="max-w-sm text-sm leading-relaxed text-[var(--fg-muted)]">
             {tab === "owned" ? (
               <>

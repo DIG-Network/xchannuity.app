@@ -14,15 +14,16 @@ export default function SageBadge() {
       rel="noopener noreferrer"
       aria-label="Download Sage Wallet"
       title="Download Sage Wallet"
-      className="group inline-flex flex-col items-center gap-2.5 rounded-[18px] border border-[rgba(94,206,113,0.28)] bg-[rgba(8,22,12,0.5)] px-7 py-3.5 no-underline shadow-[0_12px_40px_rgba(0,0,0,0.4)] backdrop-blur transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-[3px] hover:scale-[1.04] hover:border-[rgba(94,206,113,0.7)] hover:shadow-[0_14px_40px_rgba(0,0,0,0.4),0_0_28px_rgba(94,206,113,0.45)]"
+      className="group inline-flex flex-col items-center gap-2.5 rounded-[18px] border border-[rgba(203,210,222,0.2)] bg-[rgba(19,20,24,0.6)] px-7 py-3.5 no-underline shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur transition-[box-shadow,border-color] duration-300 hover:border-[rgba(203,210,222,0.4)] hover:shadow-[0_14px_40px_rgba(0,0,0,0.45),0_0_24px_rgba(203,210,222,0.12)]"
     >
-      <span className="text-xs uppercase tracking-[0.2em] text-gray-400">Best with</span>
+      <span className="text-xs uppercase tracking-[0.2em] text-[var(--fg-dim)]">Best with</span>
       <span className="flex items-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/sage-logo.png"
           alt="Sage"
-          className="h-[30px] w-[30px] rounded-lg drop-shadow-[0_0_10px_rgba(94,206,113,0.4)] transition group-hover:drop-shadow-[0_0_14px_rgba(94,206,113,0.75)]"
+          className="h-[30px] w-[30px] rounded-lg transition"
+          style={{ filter: "grayscale(1) brightness(1.4)" }}
         />
         <span className="text-[22px] font-bold leading-none" style={{ color: "var(--fg)" }}>
           Sage Wallet

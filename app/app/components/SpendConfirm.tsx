@@ -165,7 +165,7 @@ export function SpendConfirmProvider({ children }: { children: React.ReactNode }
       {phase !== "idle" && req && (
         <div className="fade-in fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
           <div className="scale-in panel w-full max-w-md space-y-4 p-6" style={{ boxShadow: "var(--shadow-pop)" }}>
-            <h2 className="font-display text-lg font-bold tracking-tight">{req.title}</h2>
+            <h2 className="font-serif text-2xl font-medium tracking-tight">{req.title}</h2>
 
             {phase === "preparing" && (
               <div className="space-y-4">

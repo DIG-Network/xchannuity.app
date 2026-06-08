@@ -57,7 +57,10 @@ export function ConnectButton() {
             </>
           ) : (
             <>
-              <span aria-hidden>⬡</span> Connect Sage
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden className="-ml-0.5">
+                <path d="M12 1.5 21.5 7v10L12 22.5 2.5 17V7L12 1.5Z" />
+              </svg>
+              Connect Sage
             </>
           )}
         </button>

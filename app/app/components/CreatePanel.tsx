@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import { useSage } from "../lib/walletconnect";
 import { useSpendConfirm, type SpendSummaryLine } from "./SpendConfirm";
 import { build_create_annuity, address_to_puzzle_hash, standard_puzzle_hash } from "../lib/wasm";
@@ -51,7 +52,7 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
     [tokenIdx, customAsset, customSymbol, customDecimals],
   );
   const feeBps = 50; // mirrors on-chain PROTOCOL_FEE_BPS (0.5%)
-  const isCmojo = token.symbol === "cMOJO";
+  const isXch = !!token.isXch; // XCH: native balance + wrap→cMOJO on create
 
   const termSeconds = customMode
     ? Math.max(1, Math.floor(parseFloat(customValue || "0") * UNIT_SECONDS[customUnit]))
@@ -65,6 +66,12 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
     setBalance(null);
     (async () => {
       try {
+        if (isXch) {
+          // native XCH balance (wrapped to cMOJO at spend time)
+          const coins = await getAssetCoins(request, null, null);
+          if (!cancelled) setBalance(sumCoinAmounts(coins));
+          return;
+        }
         if (!token.assetId) {
           if (!cancelled) setBalance(0n);
           return;
@@ -79,14 +86,22 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token.assetId, request]);
+  }, [token.assetId, isXch, request]);
 
   const balanceLabel =
     balance === null
       ? "…"
-      : isCmojo
+      : isXch
         ? `${mojosToXch(balance)} XCH`
         : `${fromMojos(balance, token.decimals)} ${token.symbol}`;
+
+  // Plain (comma-free) decimal string for one-click "use full balance".
+  const fillValue =
+    balance == null || balance <= 0n
+      ? ""
+      : isXch
+        ? mojosToXch(balance)
+        : fromMojos(balance, token.decimals);
 
   const preview = useMemo(() => {
     const amt = parseFloat(amount || "0");
@@ -97,6 +112,13 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
   }, [amount, termSeconds, feeBps]);
 
   async function create() {
+    // XCH create wraps XCH→cMOJO at spend time via cmojo-core. That spend path
+    // is being wired up; until then, guard so it doesn't fall through to the
+    // (wrong) cMOJO-CAT-coin path and fail confusingly.
+    if (isXch) {
+      toast.error("XCH annuities are being wired up (XCH→cMOJO wrap). Coming shortly.");
+      return;
+    }
     setBusy(true);
     const startTime = nowUnix();
     const endTime = startTime + termSeconds;
@@ -239,13 +261,16 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
     <div className="panel p-6">
       <div className="mb-5 flex items-center gap-2.5">
         <span
-          className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-lg"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl"
           style={{ background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid var(--accent-soft-2)" }}
           aria-hidden
         >
-          🌱
+          <svg viewBox="0 0 32 32" className="h-4 w-4">
+            <path d="M16 4 26 9.5v13L16 28 6 22.5v-13z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <path d="M11 20.5c2.5-9 7.5-9 10 0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.6" />
+          </svg>
         </span>
-        <h3 className="font-display text-lg font-bold tracking-tight">Create an annuity</h3>
+        <h3 className="font-serif text-2xl font-medium tracking-tight">Create an annuity</h3>
       </div>
 
       <div className="grid gap-5 md:grid-cols-2">
@@ -298,9 +323,22 @@ export function CreatePanel({ onDone }: { onDone: () => void }) {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-xs font-medium text-[var(--fg-muted)]">Amount ({token.symbol})</span>
-              <span className="text-xs text-[var(--fg-dim)]">
-                bal <span className="font-mono-num font-medium text-[var(--accent)]">{balanceLabel}</span>
-              </span>
+              {balance === null ? (
+                <span className="inline-flex items-center gap-1.5 text-xs text-[var(--fg-dim)]">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--accent)]" />
+                  bal
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fillValue && setAmount(fillValue)}
+                  disabled={!fillValue}
+                  title="Use full balance"
+                  className="text-xs text-[var(--fg-dim)] transition-colors hover:text-[var(--fg-muted)] disabled:cursor-default disabled:hover:text-[var(--fg-dim)]"
+                >
+                  bal <span className="font-mono-num font-medium text-[var(--accent)]">{balanceLabel}</span>
+                </button>
+              )}
             </div>
             <input
               value={amount}
